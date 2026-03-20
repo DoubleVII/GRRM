@@ -136,7 +136,7 @@ MT performance on WMT and Seed-X-Challenge benchmarks. We report BLEURT-20 and L
 ```bash
 git clone https://github.com/NJUNLP/GRRM.git
 cd GRRM
-pip install -e . --no-build-isolation
+uv sync --all-extras # or `pip install -e ".[infer,eval]"`
 ```
 
 Extra dependencies available:
@@ -243,7 +243,7 @@ hf download double7/MT_Ranking_Metric_Test --repo-type dataset --local-dir parqu
 
 Run evaluation for [Qwen2.5-7B-GRRM](https://huggingface.co/double7/Qwen2.5-7B-GRRM) on all datasets:
 ```bash
-python eval/run_ranking_acc_eval.py \
+python -m eval.run_ranking_acc_eval \
     --data_id tower_zhen_ranking_testset,wmt_newstest2020_psqm,wmt_generalMT2022_enzh_mqm,wmt_generalMT2022_zhen_mqm,wmt_generalMT2022_ende_mqm,wmt_generalMT2022_enru_mqm,seedx_challenge_ranking \
     --model_path path/to/Qwen2.5-7B-GRRM \
     --model_name Qwen2.5-7B-GRRM \ # model name for logging
@@ -289,7 +289,7 @@ Register your datasets in [utils/config.py](utils/config.py) by adding entries t
 Run evaluation for [Qwen2.5-7B-MT-GRRM-Optimized](https://huggingface.co/double7/Qwen2.5-7B-MT-GRRM-Optimized) on Zh<->En data:
 
 ```bash
-python eval/run_mt_eval.py \
+python -m eval.run_mt_eval \
     --data_id seedx_challenge_zhen,seedx_challenge_enzh,wmt24pp_en_zh,wmt23_zh_en \
     --model_path path/to/Qwen2.5-7B-MT-GRRM-Optimized \
     --model_name Qwen2.5-7B-MT-GRRM-Optimized \

@@ -1,5 +1,4 @@
 from typing import Union
-import os
 import warnings
 from tqdm import tqdm
 from openai_harmony import (
@@ -12,7 +11,7 @@ from openai_harmony import (
     SystemContent,
 )
 from utils.config import LANG_MAP
-from utils.helpers import find_int_in_string
+from utils.helpers import find_int_in_string, get_auto_tp_size
 
 
 
@@ -75,20 +74,7 @@ def extract_score(response: str):
 
 def init_oss_model(model: str):
     from vllm import LLM
-    tp_size = 1
-    try:
-        import torch
-        if hasattr(torch, "cuda") and torch.cuda.is_available():
-            tp_size = max(1, int(torch.cuda.device_count()))
-    except Exception:
-        pass
-    if tp_size < 1:
-        visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
-        if visible:
-            devs = [d.strip() for d in visible.split(",") if d.strip() not in ("", "-1")]
-            tp_size = max(1, len(devs))
-        else:
-            tp_size = 1
+    tp_size = get_auto_tp_size()
     llm = LLM(model=model, trust_remote_code=True, tensor_parallel_size=tp_size)
     print(f"Detected CUDA devices: {tp_size}; tensor_parallel_size={tp_size}")
     return llm

@@ -14,6 +14,7 @@ dependencies = [
     "pandas",
     "pyarrow",
     "fire",
+    "wandb",
 ]
 
 requires-python = ">=3.10"
@@ -71,10 +72,5 @@ infer = [
 eval = [
     "sacrebleu[ja,ko]",
     "bleurt @ git+https://github.com/google-research/bleurt.git@master",
-    "tensorflow==2.19.0",
-]
-dev = [
-    "pytest",
-    "black",
-    "ruff",
+    "tensorflow[and_cuda]",
 ]

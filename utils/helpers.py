@@ -1,6 +1,25 @@
+import os
 import numpy as np
 import re
 from typing import Optional, Dict
+
+
+def get_auto_tp_size() -> int:
+    tp_size = 1
+    try:
+        import torch
+        if hasattr(torch, "cuda") and torch.cuda.is_available():
+            tp_size = max(1, int(torch.cuda.device_count()))
+    except Exception:
+        pass
+    if tp_size < 1:
+        visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        if visible:
+            devs = [d.strip() for d in visible.split(",") if d.strip() not in ("", "-1")]
+            tp_size = max(1, len(devs))
+        else:
+            tp_size = 1
+    return tp_size
 
 def get_cand_num(rank_text: str) -> int:
     rank_text = rank_text.strip()

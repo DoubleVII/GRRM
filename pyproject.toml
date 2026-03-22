@@ -73,4 +73,5 @@ eval = [
     "sacrebleu[ja,ko]",
     "bleurt @ git+https://github.com/google-research/bleurt.git@master",
     "tensorflow[and_cuda]",
+    "kernels",
 ]

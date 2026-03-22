@@ -8,7 +8,7 @@ import wandb
 from utils.config import MT_TEST_DATA_META_INFO
 import numpy as np
 from inference.run_mt import load_model_tokenizer
-import inference.run_oss_SQM as run_oss_eval
+import inference.run_oss_SQM as run_oss_SQM
 
 def log_results_to_wandb(
     datasets_metric_results: Dict[str, Dict[str, float]],
@@ -187,23 +187,104 @@ def run_inference(
     return mt_list_for_runs
 
 
-def run_eval(
+def _normalize_metric_output(output: Any, n_items: int, n_runs: int) -> list[float]:
+    try:
+        import numpy as _np
+    except Exception:
+        _np = None
+
+    if isinstance(output, dict):
+        if "scores" in output:
+            output = output["scores"]
+        elif "bleurt_scores" in output:
+            output = output["bleurt_scores"]
+
+    if _np is not None and isinstance(output, _np.ndarray):
+        output = output.tolist()
+
+    if isinstance(output, list):
+        if len(output) == n_runs and len(output) > 0 and isinstance(output[0], list):
+            return [v for sub in output for v in sub]
+        if len(output) == n_items * n_runs:
+            return output
+
+    raise ValueError(f"Unexpected metric output shape/type: type={type(output)}, len={getattr(output, '__len__', 'NA')}")
+
+def _average_overall(scores: list[float]) -> tuple[float, int]:
+    vals: list[float] = []
+    none_count: int = 0
+    for s in scores:
+        if s is None:
+            none_count += 1
+            continue
+        try:
+            vals.append(float(s))
+        except Exception:
+            none_count += 1
+            continue
+    if not vals:
+        return float("nan"), none_count
+    return sum(vals) / len(vals), none_count
+
+def _average_per_item(scores: list[float], n_items: int, n_runs: int) -> list[Optional[float]]:
+    avgs: list[Optional[float]] = []
+    for i in range(n_items):
+        vals: list[float] = []
+        for r in range(n_runs):
+            idx = r * n_items + i
+            s = scores[idx]
+            if s is None:
+                continue
+            try:
+                vals.append(float(s))
+            except Exception:
+                continue
+        if vals:
+            avgs.append(sum(vals) / len(vals))
+        else:
+            avgs.append(None)
+    return avgs
+
+def run_bleurt_eval(
     df: pd.DataFrame,
     mt_list_for_runs: list[list[str]],
     runs: int,
-    metrics: list[str],
-    oss_models: Optional[Dict[str, Any]] = None,
     bleurt_model_path: Optional[str] = None,
-    oss_model_path: Optional[str] = None,
-) -> tuple[Dict[str, float], list[str], Dict[str, int], Dict[str, list[Optional[float]]]]:
-    # Flatten mt outputs (runs x N -> N*runs)
+) -> tuple[float, int, list[Optional[float]]]:
     mt_list_for_runs = [item for sublist in mt_list_for_runs for item in sublist]
 
     n = len(df)
     if n == 0:
         raise ValueError("Input data is empty: df has 0 rows")
 
-    # Build flat lists for references and language pairs, aligned with mt_list_for_runs
+    ref_mt_list = df["trg_text"].tolist()
+    refs_flat = ref_mt_list * runs
+
+    try:
+        import eval.bleurt_eval_cli as bleurt_eval_cli
+    except Exception as e:
+        raise ImportError(f"BLEURT metric requested but bleurt_eval_cli not found: {e}")
+    bleurt_path = bleurt_model_path if bleurt_model_path is not None else "BLEURT-20"
+    bleurt_output = bleurt_eval_cli.func_call(bleurt_path, mt_list_for_runs, refs_flat)
+    bleurt_scores_flat = _normalize_metric_output(bleurt_output, n, runs)
+    avg, none_count = _average_overall(bleurt_scores_flat)
+    per_item_metric_avgs = _average_per_item(bleurt_scores_flat, n, runs)
+
+    return avg, none_count, per_item_metric_avgs
+
+def run_oss_eval(
+    df: pd.DataFrame,
+    mt_list_for_runs: list[list[str]],
+    runs: int,
+    oss_model,
+    oss_model_path: Optional[str] = None,
+) -> tuple[float, int, list[Optional[float]]]:
+    mt_list_for_runs = [item for sublist in mt_list_for_runs for item in sublist]
+
+    n = len(df)
+    if n == 0:
+        raise ValueError("Input data is empty: df has 0 rows")
+
     ref_mt_list = df["trg_text"].tolist()
     refs_flat = ref_mt_list * runs
 
@@ -215,129 +296,28 @@ def run_eval(
     src_langs_flat = src_langs * runs
     trg_langs_flat = trg_langs * runs
 
-    # add evaluation hint to ref
     if "comment" in df.columns:
         comment_list = df["comment"].tolist()
-        # concatenate reference and evaluation hint. The evaluation hint of Seed-X-Challenge set is in Chinese, so we use Chinese prompt.
         ref_hint_list = [f"{ref}\n评估重点：\n{comment}" for ref, comment in zip(refs_flat, comment_list)]
         ref_hint_flat = ref_hint_list * runs
     else:
         ref_hint_flat = None
 
-    # Aggregate results: { metric: dataset-level avg }
-    metric_results: Dict[str, float] = {}
-    valid_metrics: list[str] = []
-    metric_none_counts: Dict[str, int] = {}
-    # Per-item metric averages (averaged across runs)
-    per_item_metric_avgs: Dict[str, list[Optional[float]]] = {}
+    model_path = oss_model_path if oss_model_path is not None else "openai/gpt-oss-120b"
+    oss_output = run_oss_SQM.func_call(
+        src_list=src_flat,
+        mt_list=mt_list_for_runs,
+        src_langs=src_langs_flat,
+        trg_langs=trg_langs_flat,
+        ref_list=ref_hint_flat if ref_hint_flat is not None else refs_flat,
+        model=oss_model,
+        model_path=model_path,
+    )
+    oss_scores_flat = _normalize_metric_output(oss_output, n, runs)
+    avg, none_count = _average_overall(oss_scores_flat)
+    per_item_metric_avgs = _average_per_item(oss_scores_flat, n, runs)
 
-    def _normalize_metric_output(output: Any, n_items: int, n_runs: int) -> list[float]:
-        # Support multiple return formats: list, list[list], dict with scores, numpy array, etc.
-        try:
-            import numpy as _np
-        except Exception:
-            _np = None
-
-        if isinstance(output, dict):
-            if "scores" in output:
-                output = output["scores"]
-            elif "bleurt_scores" in output:
-                output = output["bleurt_scores"]
-
-        if _np is not None and isinstance(output, _np.ndarray):
-            output = output.tolist()
-
-        if isinstance(output, list):
-            if len(output) == n_runs and len(output) > 0 and isinstance(output[0], list):
-                # Format: [[...], [...]]
-                return [v for sub in output for v in sub]
-            # Flat vector
-            if len(output) == n_items * n_runs:
-                return output
-
-        raise ValueError(f"Unexpected metric output shape/type: type={type(output)}, len={getattr(output, '__len__', 'NA')}")
-
-    def _average_overall(scores: list[float]) -> tuple[float, int]:
-        vals: list[float] = []
-        none_count: int = 0
-        for s in scores:
-            if s is None:
-                none_count += 1
-                continue
-            try:
-                vals.append(float(s))
-            except Exception:
-                # Skip values that cannot be converted
-                none_count += 1
-                continue
-        if not vals:
-            return float("nan"), none_count
-        return sum(vals) / len(vals), none_count
-
-    def _average_per_item(scores: list[float], n_items: int, n_runs: int) -> list[Optional[float]]:
-        avgs: list[Optional[float]] = []
-        for i in range(n_items):
-            vals: list[float] = []
-            for r in range(n_runs):
-                idx = r * n_items + i
-                s = scores[idx]
-                if s is None:
-                    continue
-                try:
-                    vals.append(float(s))
-                except Exception:
-                    # Skip values that cannot be converted
-                    continue
-            if vals:
-                avgs.append(sum(vals) / len(vals))
-            else:
-                avgs.append(None)
-        return avgs
-
-    # Compute metrics and aggregate by language pair
-    for m in metrics:
-        if m == "bleurt":
-            try:
-                import eval.bleurt_eval_cli as bleurt_eval_cli
-                # import eval.bleurt_service as bleurt_eval_cli
-            except Exception as e:
-                raise ImportError(f"BLEURT metric requested but bleurt_eval_cli not found: {e}")
-            bleurt_path = bleurt_model_path if bleurt_model_path is not None else "BLEURT-20"
-            bleurt_output = bleurt_eval_cli.func_call(bleurt_path, mt_list_for_runs, refs_flat)
-            bleurt_scores_flat = _normalize_metric_output(bleurt_output, n, runs)
-            avg, none_count = _average_overall(bleurt_scores_flat)
-            metric_results[m] = avg
-            metric_none_counts[m] = none_count
-            # Compute per-item average score
-            per_item_metric_avgs[m] = _average_per_item(bleurt_scores_flat, n, runs)
-            valid_metrics.append(m)
-        elif m == "oss":
-            # Prefer pre-loaded OSS model; load on-demand if not provided (backward compatible)
-            oss_model = oss_models.get("oss") if oss_models is not None else None
-
-            model_path = oss_model_path if oss_model_path is not None else "openai/gpt-oss-120b"
-            if oss_model is None:
-                oss_model = run_oss_eval.init_oss_model(model_path)
-            oss_output = run_oss_eval.func_call(
-                src_list=src_flat,
-                mt_list=mt_list_for_runs,
-                src_langs=src_langs_flat,
-                trg_langs=trg_langs_flat,
-                ref_list=ref_hint_flat if ref_hint_flat is not None else refs_flat,
-                model=oss_model,
-                model_path=model_path,
-            )
-            oss_scores_flat = _normalize_metric_output(oss_output, n, runs)
-            avg, none_count = _average_overall(oss_scores_flat)
-            metric_results[m] = avg
-            metric_none_counts[m] = none_count
-            per_item_metric_avgs[m] = _average_per_item(oss_scores_flat, n, runs)
-            valid_metrics.append(m)
-        else:
-            # Unimplemented metrics can be extended here
-            continue
-
-    return metric_results, valid_metrics, metric_none_counts, per_item_metric_avgs
+    return avg, none_count, per_item_metric_avgs
 
 
 def _clear_mem():
@@ -469,46 +449,79 @@ def main(
     bleurt_model_path = kwargs.get("bleurt_model_path")
     oss_model_path = kwargs.get("oss_model_path")
 
-    # Pre-load OSS models (load on-demand for metrics being used)
-    oss_models: Dict[str, Any] = {}
-    if "oss" in metrics:
-        if oss_model_path is None:
-            oss_model_path = "openai/gpt-oss-120b"
-        oss_models["oss"] = run_oss_eval.init_oss_model(oss_model_path)
-
-    # Stage 2: Evaluate each dataset separately (including bleurt / oss etc.)
-    datasets_metric_results: Dict[str, Dict[str, float]] = {}
-    datasets_metric_none_counts: Dict[str, Dict[str, int]] = {}
-    datasets_valid_metrics: Dict[str, List[str]] = {}
+    # Stage 2: Evaluate by metric groups, first all bleurt, then all oss
+    datasets_metric_results: Dict[str, Dict[str, float]] = {did: {} for did in data_id_list}
+    datasets_metric_none_counts: Dict[str, Dict[str, int]] = {did: {} for did in data_id_list}
+    datasets_per_item_metric_avgs: Dict[str, Dict[str, list[Optional[float]]]] = {did: {} for did in data_id_list}
+    datasets_valid_metrics: Dict[str, List[str]] = {did: [] for did in data_id_list}
 
     all_valid_metrics: List[str] = []
     seen_metrics = set()
 
-    for did in data_id_list:
-        df = dfs[did]
-        mt_list_for_runs = mt_lists_for_runs[did]
+    # First run BLEURT evaluation for all datasets
+    if "bleurt" in metrics:
+        for did in data_id_list:
+            df = dfs[did]
+            mt_list_for_runs = mt_lists_for_runs[did]
 
-        metric_results, valid_metrics, metric_none_counts, per_item_metric_avgs = run_eval(
-            df,
-            mt_list_for_runs,
-            runs,
-            metrics,
-            oss_models=oss_models,
-            bleurt_model_path=bleurt_model_path,
-            oss_model_path=oss_model_path,
-        )
+            avg, none_count, per_item_avgs = run_bleurt_eval(
+                df,
+                mt_list_for_runs,
+                runs,
+                bleurt_model_path=bleurt_model_path,
+            )
 
-        datasets_metric_results[did] = metric_results
-        datasets_metric_none_counts[did] = metric_none_counts
-        datasets_valid_metrics[did] = valid_metrics
+            datasets_metric_results[did]["bleurt"] = avg
+            datasets_metric_none_counts[did]["bleurt"] = none_count
+            datasets_per_item_metric_avgs[did]["bleurt"] = per_item_avgs
+            datasets_valid_metrics[did].append("bleurt")
 
-        for m in valid_metrics:
-            if m not in seen_metrics:
-                seen_metrics.add(m)
-                all_valid_metrics.append(m)
+            if "bleurt" not in seen_metrics:
+                seen_metrics.add("bleurt")
+                all_valid_metrics.append("bleurt")
 
-        # Optionally save all inference results and per-item metric averages to current directory
-        if save_results:
+    # Then run OSS evaluation for all datasets
+    if "oss" in metrics:
+        if oss_model_path is None:
+            oss_model_path = "openai/gpt-oss-120b"
+        oss_model = run_oss_SQM.init_oss_model(oss_model_path)
+
+        for did in data_id_list:
+            df = dfs[did]
+            mt_list_for_runs = mt_lists_for_runs[did]
+
+            avg, none_count, per_item_avgs = run_oss_eval(
+                df,
+                mt_list_for_runs,
+                runs,
+                oss_model,
+                oss_model_path=oss_model_path,
+            )
+
+            datasets_metric_results[did]["oss"] = avg
+            datasets_metric_none_counts[did]["oss"] = none_count
+            datasets_per_item_metric_avgs[did]["oss"] = per_item_avgs
+            datasets_valid_metrics[did].append("oss")
+
+            if "oss" not in seen_metrics:
+                seen_metrics.add("oss")
+                all_valid_metrics.append("oss")
+
+        # Release OSS model
+        try:
+            del oss_model
+            _clear_mem()
+        except Exception:
+            pass
+
+    # Optionally save all inference results and per-item metric averages to current directory
+    if save_results:
+        for did in data_id_list:
+            df = dfs[did]
+            mt_list_for_runs = mt_lists_for_runs[did]
+            valid_metrics = datasets_valid_metrics[did]
+            per_item_metric_avgs = datasets_per_item_metric_avgs[did]
+
             save_results_to_json(
                 df=df,
                 mt_list_for_runs_nested=mt_list_for_runs,

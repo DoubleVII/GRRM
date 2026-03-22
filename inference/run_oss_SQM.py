@@ -9,6 +9,7 @@ from openai_harmony import (
     Message,
     Role,
     SystemContent,
+    HarmonyError,
 )
 from utils.config import LANG_MAP
 from utils.helpers import find_int_in_string, get_auto_tp_size
@@ -105,7 +106,13 @@ def run_generate(llm, inputs: list[int], sampling_params, encoding: HarmonyEncod
     for o in outs:
         gen = o.outputs[0]
         toks = gen.token_ids
-        entries = encoding.parse_messages_from_completion_tokens(toks, Role.ASSISTANT)
+        try:
+            entries = encoding.parse_messages_from_completion_tokens(toks, Role.ASSISTANT)
+        except HarmonyError as e:
+            warnings.warn(f"Ignore HarmonyError: {e}")
+            results.append(None)
+            continue
+
         think_text = None
         resp_text = None
         if len(entries) != 2:

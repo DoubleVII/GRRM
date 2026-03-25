@@ -458,29 +458,7 @@ def main(
     all_valid_metrics: List[str] = []
     seen_metrics = set()
 
-    # First run BLEURT evaluation for all datasets
-    if "bleurt" in metrics:
-        for did in data_id_list:
-            df = dfs[did]
-            mt_list_for_runs = mt_lists_for_runs[did]
-
-            avg, none_count, per_item_avgs = run_bleurt_eval(
-                df,
-                mt_list_for_runs,
-                runs,
-                bleurt_model_path=bleurt_model_path,
-            )
-
-            datasets_metric_results[did]["bleurt"] = avg
-            datasets_metric_none_counts[did]["bleurt"] = none_count
-            datasets_per_item_metric_avgs[did]["bleurt"] = per_item_avgs
-            datasets_valid_metrics[did].append("bleurt")
-
-            if "bleurt" not in seen_metrics:
-                seen_metrics.add("bleurt")
-                all_valid_metrics.append("bleurt")
-
-    # Then run OSS evaluation for all datasets
+    # First run OSS evaluation for all datasets
     if "oss" in metrics:
         if oss_model_path is None:
             oss_model_path = "openai/gpt-oss-120b"
@@ -513,6 +491,28 @@ def main(
             _clear_mem()
         except Exception:
             pass
+
+    # Then run BLEURT evaluation for all datasets
+    if "bleurt" in metrics:
+        for did in data_id_list:
+            df = dfs[did]
+            mt_list_for_runs = mt_lists_for_runs[did]
+
+            avg, none_count, per_item_avgs = run_bleurt_eval(
+                df,
+                mt_list_for_runs,
+                runs,
+                bleurt_model_path=bleurt_model_path,
+            )
+
+            datasets_metric_results[did]["bleurt"] = avg
+            datasets_metric_none_counts[did]["bleurt"] = none_count
+            datasets_per_item_metric_avgs[did]["bleurt"] = per_item_avgs
+            datasets_valid_metrics[did].append("bleurt")
+
+            if "bleurt" not in seen_metrics:
+                seen_metrics.add("bleurt")
+                all_valid_metrics.append("bleurt")
 
     # Optionally save all inference results and per-item metric averages to current directory
     if save_results:

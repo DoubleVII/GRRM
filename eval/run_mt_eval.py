@@ -378,6 +378,10 @@ def main(
         **kwargs: Additional keyword arguments. Supported keys:
             - bleurt_model_path: Path to the BLEURT model. If not provided, defaults to "BLEURT-20".
             - oss_model_path: Path to the gpt-oss model. If not provided, defaults to "openai/gpt-oss-120b".
+            - mt_vllm_kwargs: Dictionary of parameters to pass to vLLM initialization for the MT model,
+              such as gpu_memory_utilization, quantization, etc.
+            - oss_vllm_kwargs: Dictionary of parameters to pass to vLLM initialization for the OSS model,
+              such as gpu_memory_utilization, quantization, etc.
 
     Raises:
         ValueError: If data_id is empty or contains invalid dataset identifiers.
@@ -401,7 +405,8 @@ def main(
 
 
     # Load MT model once and reuse, avoiding repeated loading in run_inference
-    model, tokenizer = load_model_tokenizer(model_path)
+    mt_vllm_kwargs = kwargs.get("mt_vllm_kwargs", {})
+    model, tokenizer = load_model_tokenizer(model_path, **mt_vllm_kwargs)
 
     # Stage 1: Run translation inference on all datasets first, avoiding interleaving with evaluation (especially OSS)
     dfs: Dict[str, pd.DataFrame] = {}
@@ -458,33 +463,12 @@ def main(
     all_valid_metrics: List[str] = []
     seen_metrics = set()
 
-    # First run BLEURT evaluation for all datasets
-    if "bleurt" in metrics:
-        for did in data_id_list:
-            df = dfs[did]
-            mt_list_for_runs = mt_lists_for_runs[did]
-
-            avg, none_count, per_item_avgs = run_bleurt_eval(
-                df,
-                mt_list_for_runs,
-                runs,
-                bleurt_model_path=bleurt_model_path,
-            )
-
-            datasets_metric_results[did]["bleurt"] = avg
-            datasets_metric_none_counts[did]["bleurt"] = none_count
-            datasets_per_item_metric_avgs[did]["bleurt"] = per_item_avgs
-            datasets_valid_metrics[did].append("bleurt")
-
-            if "bleurt" not in seen_metrics:
-                seen_metrics.add("bleurt")
-                all_valid_metrics.append("bleurt")
-
-    # Then run OSS evaluation for all datasets
+    # First run OSS evaluation for all datasets
     if "oss" in metrics:
         if oss_model_path is None:
             oss_model_path = "openai/gpt-oss-120b"
-        oss_model = run_oss_SQM.init_oss_model(oss_model_path)
+        oss_vllm_kwargs = kwargs.get("oss_vllm_kwargs", {})
+        oss_model = run_oss_SQM.init_oss_model(oss_model_path, **oss_vllm_kwargs)
 
         for did in data_id_list:
             df = dfs[did]
@@ -513,6 +497,28 @@ def main(
             _clear_mem()
         except Exception:
             pass
+
+    # Then run BLEURT evaluation for all datasets
+    if "bleurt" in metrics:
+        for did in data_id_list:
+            df = dfs[did]
+            mt_list_for_runs = mt_lists_for_runs[did]
+
+            avg, none_count, per_item_avgs = run_bleurt_eval(
+                df,
+                mt_list_for_runs,
+                runs,
+                bleurt_model_path=bleurt_model_path,
+            )
+
+            datasets_metric_results[did]["bleurt"] = avg
+            datasets_metric_none_counts[did]["bleurt"] = none_count
+            datasets_per_item_metric_avgs[did]["bleurt"] = per_item_avgs
+            datasets_valid_metrics[did].append("bleurt")
+
+            if "bleurt" not in seen_metrics:
+                seen_metrics.add("bleurt")
+                all_valid_metrics.append("bleurt")
 
     # Optionally save all inference results and per-item metric averages to current directory
     if save_results:

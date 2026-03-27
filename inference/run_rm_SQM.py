@@ -3,12 +3,12 @@ from utils.config import LANG_MAP
 from utils.helpers import get_auto_tp_size
 
 
-def load_model_tokenizer(model_path: str):
+def load_model_tokenizer(model_path: str, **vllm_kwargs):
     from vllm import LLM
     print(f"loading model from {model_path}...")
     tp_size = get_auto_tp_size()
     print(f"Detected CUDA devices: {tp_size}; tensor_parallel_size={tp_size}")
-    model = LLM(model_path, tensor_parallel_size=tp_size)
+    model = LLM(model_path, tensor_parallel_size=tp_size, **vllm_kwargs)
     tokenizer = model.get_tokenizer()
     return model, tokenizer
 

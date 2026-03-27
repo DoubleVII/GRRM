@@ -224,9 +224,9 @@ def run_eval(
             reward_out = reward_fn(None, pred_rank_str, ref_rank_str)
 
             if isinstance(reward_out, dict):
-                if "ranking_reward" in reward_out:
+                if "score" in reward_out:
                     # report ranking accuracy (ranking_reward)
-                    metric_output["ranking_acc"].append(reward_out["ranking_reward"])
+                    metric_output["ranking_acc"].append(reward_out["score"])
             else:
                 metric_output["score"].append(reward_out)
 
@@ -399,7 +399,6 @@ def main(
     log_results_to_wandb(
         datasets_metric_results=datasets_metric_results,
         config=wandb_config,
-        prompt_type=prompt_type,
     )
 
 

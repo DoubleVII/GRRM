@@ -378,6 +378,10 @@ def main(
         **kwargs: Additional keyword arguments. Supported keys:
             - bleurt_model_path: Path to the BLEURT model. If not provided, defaults to "BLEURT-20".
             - oss_model_path: Path to the gpt-oss model. If not provided, defaults to "openai/gpt-oss-120b".
+            - mt_vllm_kwargs: Dictionary of parameters to pass to vLLM initialization for the MT model,
+              such as gpu_memory_utilization, quantization, etc.
+            - oss_vllm_kwargs: Dictionary of parameters to pass to vLLM initialization for the OSS model,
+              such as gpu_memory_utilization, quantization, etc.
 
     Raises:
         ValueError: If data_id is empty or contains invalid dataset identifiers.
@@ -401,7 +405,8 @@ def main(
 
 
     # Load MT model once and reuse, avoiding repeated loading in run_inference
-    model, tokenizer = load_model_tokenizer(model_path)
+    mt_vllm_kwargs = kwargs.get("mt_vllm_kwargs", {})
+    model, tokenizer = load_model_tokenizer(model_path, **mt_vllm_kwargs)
 
     # Stage 1: Run translation inference on all datasets first, avoiding interleaving with evaluation (especially OSS)
     dfs: Dict[str, pd.DataFrame] = {}
@@ -462,7 +467,8 @@ def main(
     if "oss" in metrics:
         if oss_model_path is None:
             oss_model_path = "openai/gpt-oss-120b"
-        oss_model = run_oss_SQM.init_oss_model(oss_model_path)
+        oss_vllm_kwargs = kwargs.get("oss_vllm_kwargs", {})
+        oss_model = run_oss_SQM.init_oss_model(oss_model_path, **oss_vllm_kwargs)
 
         for did in data_id_list:
             df = dfs[did]

@@ -249,7 +249,8 @@ def main(
     add_prompt_example: bool = False,
     prompt_type: str = "ranking_score",
     runs: int = 4,
-    model_type: str = "grrm"
+    model_type: str = "grrm",
+    **kwargs,
 ):
     """
     Run ranking accuracy evaluation for reward models on specified datasets.
@@ -278,6 +279,10 @@ def main(
             - 'sqmrm': Scalar Quality Metric (SQM) Generative Reward Model
             - 'drm':  Bradley-Terry Reward Model 
             Defaults to "grrm".
+        **kwargs: Additional keyword arguments. Supported keys:
+            - vllm_kwargs: Dictionary of parameters to pass to vLLM initialization,
+              such as gpu_memory_utilization, quantization, etc.
+              For DRM models, this parameter is not used as they use transformers directly.
 
     Raises:
         ValueError: If prompt_type is not one of ['score', 'ranking', 'ranking_score'].
@@ -327,12 +332,13 @@ def main(
         dfs[did] = df
         lang_pairs[did] = lang_pair
 
+    vllm_kwargs = kwargs.get("vllm_kwargs", {})
     if model_type == "grrm":
         from inference.run_rm_GQM import load_model_tokenizer
-        model, tokenizer = load_model_tokenizer(model_path)
+        model, tokenizer = load_model_tokenizer(model_path, **vllm_kwargs)
     elif model_type == "sqmrm":
         from inference.run_rm_SQM import load_model_tokenizer
-        model, tokenizer = load_model_tokenizer(model_path)
+        model, tokenizer = load_model_tokenizer(model_path, **vllm_kwargs)
     elif model_type == "drm":
         from inference.run_drm import load_model_tokenizer
         model, tokenizer = load_model_tokenizer(model_path)

@@ -10,11 +10,10 @@ def azure_client(base_url, api_version, ak):
     )
     return client
 
-def openai_client(base_url, api_version, ak):
+def openai_client(base_url, ak):
     client = openai.OpenAI(
         base_url=base_url,
         api_key=ak,
-        api_version=api_version,
     )
     return client
 
@@ -32,11 +31,7 @@ def get_client(type:str=None, base_url=None, api_version=None, ak=None):
         if base_url is None:
             missing_vars.append("OPENAI_ENDPOINT")
     
-    if api_version is None:
-        api_version = os.getenv("OPENAI_API_VERSION")
-        if api_version is None:
-            missing_vars.append("OPENAI_API_VERSION")
-    
+
     if ak is None:
         ak = os.getenv("OPENAI_API_KEY")
         if ak is None:
@@ -46,6 +41,11 @@ def get_client(type:str=None, base_url=None, api_version=None, ak=None):
         raise ValueError(f"The following environment variables are not set: {', '.join(missing_vars)}\nPlease set these environment variables or provide them as arguments.")
     
     if type == "azure":
+        if api_version is None:
+            api_version = os.getenv("OPENAI_API_VERSION")
+            if api_version is None:
+                missing_vars.append("OPENAI_API_VERSION")
+    
         return azure_client(base_url, api_version, ak)
     else:
-        return openai_client(base_url, api_version, ak)
+        return openai_client(base_url, ak)

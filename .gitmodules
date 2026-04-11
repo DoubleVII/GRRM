@@ -1,0 +1,3 @@
+[submodule "MT_tools"]
+	path = MT_tools
+	url = https://github.com/DoubleVII/MT-tools.git

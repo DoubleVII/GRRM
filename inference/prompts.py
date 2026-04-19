@@ -70,9 +70,9 @@ def get_GQM_with_notes_prompt(
     add_example: bool = False,
     notes: str = None,
 ):
-    if len(source_lang) != 2:
+    if len(source_lang) == 2:
         source_lang = LANG_MAP[source_lang]
-    if len(target_lang) != 2:
+    if len(target_lang) == 2:
         target_lang = LANG_MAP[target_lang]
     if len(mt_texts) == 1:
         raise ValueError("Only support multiple candidates.")

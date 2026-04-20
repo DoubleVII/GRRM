@@ -13,7 +13,7 @@ from openai_harmony import (
     ReasoningEffort,
 )
 from utils.config import LANG_MAP, candidate_identifiers
-from utils.helpers import find_ints_in_string
+from utils.helpers import find_ints_in_string, parse_score_text
 from inference.run_oss_SQM import init_oss_model
 
 
@@ -74,20 +74,6 @@ def get_prompt(
         )
 
 
-def validate_candidate_identifiers(s: str, expected_score_num: int):
-    identifier_locations = []
-    for identifier in candidate_identifiers[:expected_score_num]:
-        identifier_location = s.rfind(identifier)
-        if identifier_location == -1:
-            return False
-        identifier_locations.append(identifier_location)
-        if (
-            len(identifier_locations) > 1
-            and identifier_location <= identifier_locations[-2]
-        ):
-            return False
-    return True
-
 
 def extract_response(response: str, expected_score_num: int, explicit_analysis: bool = True):
     response = response.strip()
@@ -101,12 +87,20 @@ def extract_response(response: str, expected_score_num: int, explicit_analysis: 
             score_line = response
     else:
         score_line = response[last_line_index + 1 :].strip()
-    if not validate_candidate_identifiers(score_line, expected_score_num):
+    
+    if score_line.startswith("**") and score_line.endswith("**"):
+        score_line = score_line[2:-2]
+
+    scores = parse_score_text(score_line)
+    if scores is None:
         print(f"invalid score line: {score_line}")
         return None
-    scores = find_ints_in_string(score_line, expected_score_num)
-    if scores is None:
-        return None
+    for i in range(expected_score_num):
+        if candidate_identifiers[i] not in scores:
+            print(f"missing score for {candidate_identifiers[i]} in {score_line}")
+            return None
+    scores = [scores[candidate_identifiers[i]] for i in range(expected_score_num)]
+    
     return {"analysis": response[:last_line_index].strip(), "scores": scores}
 
 

@@ -296,10 +296,10 @@ Output format:
 ### Conclusion
 [Overall comparison and final judgment, explicitly referring to consistency with the Notes as one of the ranking reasons]
 
-### Final Ranking:
+### Final Ranking
 [Output on a single line in descending order, e.g. `B > A = D > C`]
 
-### Scores:
+### Scores
 [Output on a single line in descending order, e.g. `B: 9, A: 7, D: 7, C: 2`]
 
 ---

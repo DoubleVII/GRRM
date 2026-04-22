@@ -9,8 +9,8 @@ from openai_harmony import (
     Role,
 )
 from inference.run_oss_SQM import init_oss_model, load_encoding
-from inference.run_oss_GQM import validate_candidate_identifiers, extract_response
-from inference.prompts import get_GQM_with_notes_prompt
+from inference.run_oss_GQM import extract_response
+from inference.prompts import get_GQM_with_notes_prompt, get_teacher_GQM_with_notes_prompt
 
 
 def prepare_vllm_inputs(
@@ -38,9 +38,8 @@ def prepare_vllm_inputs(
     for src_text, mt_texts, notes, src_lang, trg_lang in zip(
         src_list, mt_list, notes_list, src_langs, trg_langs
     ):
-        prompt = get_GQM_with_notes_prompt(
-            src_lang, trg_lang, src_text, mt_texts,
-            prompt_format, add_example, notes=notes,
+        prompt = get_teacher_GQM_with_notes_prompt(
+            src_lang, trg_lang, src_text, mt_texts, prompt_format=prompt_format, add_example=add_example, notes=notes,
         )
         convo = Conversation.from_messages([
             Message.from_role_and_content(Role.SYSTEM, system_content),

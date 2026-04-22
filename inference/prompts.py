@@ -267,3 +267,84 @@ if __name__ == "__main__":
     print(get_group_post_edit_prompt("en", "zh", "Hello, world!", ["你好，世界！", "您好，砸瓦鲁多"], notes="A helpful note."))
 
     # print(get_post_edit_prompt("en", "zh", "Hello, world!", "你好，世界！", "A helpful note."))
+
+
+
+
+teacher_GQM_prompt_template = """You are given a source text in {source_lang}, multiple {target_lang} translation candidates, and a set of Notes. Your task is to evaluate the translation quality of all candidates step by step, compare them, and then rank and score them.
+
+Important instructions:
+1. Treat the Notes as an important and authoritative reference for evaluation.
+2. For each translation candidate, explicitly check whether it is consistent with the Notes.
+3. If your own interpretation conflicts with the Notes on any point, follow the Notes.
+4. Only evaluate based on your own language understanding for aspects that are not covered by the Notes.
+5. In the analysis section, clearly state how well each candidate matches the Notes, and use this as one of the key factors in the final ranking.
+6. Compare candidates one by one in terms of:
+   - accuracy of meaning
+   - consistency with the Notes
+   - completeness
+   - fluency and naturalness
+   - whether the wording introduces mistranslation, omission, or misleading information
+7. Keep the analysis concise but explicit.
+
+Output format:
+### Step-by-step Analysis
+[Source text analysis/breakdown]
+
+[Analysis for each candidate, including whether and how it matches the Notes]
+
+### Conclusion
+[Overall comparison and final judgment, explicitly referring to consistency with the Notes as one of the ranking reasons]
+
+### Final Ranking:
+[Output on a single line in descending order, e.g. `B > A = D > C`]
+
+### Scores:
+[Output on a single line in descending order, e.g. `B: 9, A: 7, D: 7, C: 2`]
+
+---
+
+Source text:
+```
+{source_text}
+```
+
+{candidate_prompts}
+
+Notes:
+```
+{notes}
+```
+"""
+
+
+def get_teacher_GQM_with_notes_prompt(
+    source_lang,
+    target_lang,
+    source_text,
+    mt_texts,
+    notes: str = None,
+    **kwargs,
+):
+    if len(source_lang) == 2:
+        source_lang = LANG_MAP[source_lang]
+    if len(target_lang) == 2:
+        target_lang = LANG_MAP[target_lang]
+    if len(mt_texts) == 1:
+        raise ValueError("Only support multiple candidates.")
+    if len(mt_texts) > len(candidate_identifiers):
+        raise ValueError(f"Only support {len(candidate_identifiers)} candidates.")
+
+
+    candidate_prompts = "".join(
+        candidate_prompt.format(candidate_identifiers[i], mt_texts[i])
+        for i in range(len(mt_texts))
+    )
+
+    return teacher_GQM_prompt_template.format(
+        source_lang=source_lang,
+        target_lang=target_lang,
+        source_text=source_text,
+        candidate_prompts=candidate_prompts,
+        notes=notes,
+    )

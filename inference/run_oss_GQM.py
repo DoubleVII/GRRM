@@ -14,7 +14,7 @@ from openai_harmony import (
 )
 from utils.config import LANG_MAP, candidate_identifiers
 from utils.helpers import find_ints_in_string
-from inference.run_oss_SQM import init_oss_model
+from inference.run_oss_SQM import init_oss_model, load_encoding
 
 
 prompt_template = """Given a source text in {} and multiple translation candidates in {}. Perform a step by step analysis and comparison of the translation quality for the candidates. Finally, scoring the candidates with integer scores on a scale from 0 to 10. Output your analysis and comparison first and output the scores in the end line (e.g. `{}`).
@@ -217,7 +217,9 @@ def func_call(
     out_data["scores"] = []
     out_data["analysis"] = []
     out_data["thinking"] = []
-    llm, encoding, stop_token_ids = init_oss_model(model)
+    llm = init_oss_model(model)
+    encoding = load_encoding()
+    stop_token_ids = encoding.stop_tokens_for_assistant_actions()
 
     sampling_params = SamplingParams(
         max_tokens=8192,
@@ -268,3 +270,20 @@ def func_call(
         out_data["analysis"].append(res["analysis"])
         out_data["thinking"].append(res["thinking"])
     return out_data
+
+
+if __name__ == "__main__":
+
+    import pandas as pd
+    df = pd.read_parquet("/home/nfs06/yangs/data/parquet_data/ranking_distill_data/qwen_tower_sampling_zhen.ranking.rl.test.parquet")
+    assert len(df) == 512
+    src_list = df["src_text"].tolist()
+    mt_list = df["mt_sampling_text"].tolist()
+    src_lang = df["src_lang"].tolist()
+    trg_lang = df["trg_lang"].tolist()
+    model = "/home/zfs01/yangs/LLM/openai/gpt-oss-120b"
+
+    out_data = func_call(src_list, mt_list, src_lang, trg_lang, model=model)
+    scores = out_data["scores"]
+    df["oss_ranking_score"] = scores
+    df.to_parquet("qwen_tower_sampling_zhen.ranking.rl.test.oss_score.parquet")

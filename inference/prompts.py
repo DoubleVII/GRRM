@@ -261,6 +261,115 @@ def get_post_edit_prompt(source_lang, target_lang, source_text, mt_text, notes):
     )
 
 
+prep_notes_task_prompt = """You are a translation-prep agent. Your task is not to fully translate the source text, but to analyze it and produce only a concise list of translation-relevant notes that may help a downstream translation agent.
+
+Input will contain:
+- source language
+- target language
+- source text
+
+Your job:
+1. Read the source text and assess whether it contains any translation difficulties, special handling requirements, or notable stylistic/semantic risks.
+2. First, provide a brief step-by-step analysis of whether any special translation guidance is needed and why.
+3. In that analysis, assign a translation difficulty score from 0 to 10, where:
+   - 0 = trivial to translate, no special handling needed
+   - 2 = very easy, standard translation knowledge is sufficient
+   - 4 = mostly straightforward, but with minor points worth noticing
+   - 6 = moderately difficult, with some non-obvious translation risks
+   - 8 = difficult, with clear issues such as slang, ambiguity, cultural references, or style-sensitive language
+   - 10 = extremely difficult, with multiple serious translation challenges
+4. Then summarize the useful translation notes into a short natural-language checklist for a downstream translator.
+5. You may include recommended translations for specific words or short phrases when helpful, but do not produce a full translation of the text.
+6. Do not include obvious points that a generally capable translation model would already know.
+
+Be conservative:
+- In most ordinary cases, no notes are needed.
+- Avoid over-annotating simple sentences.
+- Output notes only when they are genuinely useful.
+- The difficulty score should reflect actual translation difficulty, not just text length or topic complexity.
+
+Include notes only when necessary, for example:
+- slang, memes, or highly colloquial expressions
+- idioms, proverbs, wordplay, puns, or double meanings
+- culturally specific references
+- named entities, brands, titles, product names, organizations, places, or historical references
+- terminology needing domain-specific handling
+- ambiguous pronouns or unclear referents that require caution
+- important tone/register constraints
+- literary, rhetorical, poetic, humorous, sarcastic, or emotionally marked language worth preserving
+- formatting-sensitive elements such as quotes, lists, UI strings, slogans, hashtags, or line breaks
+- intentionally ungrammatical, stylized, ironic, or character-voiced language
+- cases where transliteration vs translation may matter
+
+Output format requirements:
+1. First output your step-by-step analysis.
+2. The analysis must explicitly include a line in the form:
+   Difficulty score: X/10
+3. After that, output the final result as a single Markdown code block.
+4. Inside the code block, provide either:
+   a) a numbered list of concise translation notes, or
+   b) `No special translation notes needed.`
+
+Good output example:
+
+Step-by-step analysis
+1. The text contains a slang expression that should not be translated literally.
+2. The second sentence carries sarcasm, which may be easy to lose in translation.
+3. A named entity appears and should be interpreted correctly.
+Difficulty score: 7/10
+
+```markdown
+1. "spill the tea" is slang meaning to reveal gossip; translate by meaning rather than literally. Possible rendering: "爆料" / "说八卦" depending on target-language style.
+2. Keep the sarcastic tone in the second sentence.
+3. "Apple" here refers to the company, not the fruit.
+```
+
+Example when no notes are needed:
+
+Step-by-step analysis
+1. The text is straightforward and literal.
+2. There are no unusual idioms, cultural references, ambiguities, or style-sensitive expressions.
+3. Standard translation ability should be sufficient.
+Difficulty score: 1/10
+
+```markdown
+No special translation notes needed.
+```
+
+Bad output examples:
+- giving a full translation of the text
+- explaining every sentence in excessive detail
+- listing trivial grammar points
+- omitting the difficulty score
+- omitting the step-by-step analysis
+- putting the final notes outside the code block
+
+Your goal is to maximize usefulness while minimizing unnecessary guidance.
+"""
+
+prep_notes_prompt_template = """
+{}
+
+Now analyze the following source text.
+Source language: {}
+Target language: {}
+
+Source text:
+```
+{}
+```
+"""
+
+
+def get_prep_notes_prompt(source_lang, target_lang, source_text):
+    if len(source_lang) == 2:
+        source_lang = LANG_MAP[source_lang]
+    if len(target_lang) == 2:
+        target_lang = LANG_MAP[target_lang]
+
+    return prep_notes_prompt_template.format(prep_notes_task_prompt, source_lang, target_lang, source_text)
+
+
 if __name__ == "__main__":
     # print(get_GQM_with_notes_prompt("en", "zh", "Hello, world!", ["你好，世界！", "您好，砸瓦鲁多"], "ranking_score", add_example=False, notes="A helpful note."))
     

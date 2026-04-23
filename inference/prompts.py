@@ -244,6 +244,108 @@ def get_oss_group_post_edit_prompt(
         )
 
 
+
+group_post_edit_with_notes_prompt_templates = """You are a translation post-editing agent.
+
+Your task is to produce a final improved translation in the target language by:
+- using the provided source text,
+- reviewing the available translation candidates,
+- and strictly following the provided translation notes.
+
+Your priority is to respect the notes and make the smallest necessary edits.
+
+Be especially careful about:
+- preserving meaning from the source text
+- preserving tone/register/style when mentioned in the notes
+- not introducing unsupported improvements
+
+Now perform the task on the following input.
+
+Source language: {source_lang}
+Target language: {target_lang}
+
+Source text:
+```
+{source_text}
+```
+
+{candidate_prompts}
+
+Notes:
+```
+{notes}
+```
+"""
+
+
+group_post_edit_prompt_templates = """You are a translation post-editing agent.
+
+Your task is to produce a final improved translation in the target language by:
+- using the provided source text,
+- reviewing the available translation candidates,
+- and selecting or carefully combining the best parts of the candidates.
+
+
+Be especially careful about:
+- preserving meaning from the source text
+- resolving omissions, mistranslations, and overtranslations
+- choosing the most accurate wording among candidates
+- maintaining grammatical correctness and fluency
+- improving your translation if necessary
+
+Now perform the task on the following input.
+
+Source language: {source_lang}
+Target language: {target_lang}
+
+Source text:
+```
+{source_text}
+```
+
+{candidate_prompts}
+"""
+
+
+def get_group_post_edit_prompt(
+    source_lang,
+    target_lang,
+    source_text,
+    mt_texts,
+    notes: str = None,
+    ):
+    if len(source_lang) != 2:
+        source_lang = LANG_MAP[source_lang]
+    if len(target_lang) != 2:
+        target_lang = LANG_MAP[target_lang]
+    if len(mt_texts) == 1:
+        raise ValueError("Only support multiple candidates.")
+    if len(mt_texts) > len(candidate_identifiers):
+        raise ValueError(f"Only support {len(candidate_identifiers)} candidates.")
+
+
+    candidate_prompts = "".join(
+        candidate_prompt.format(candidate_identifiers[i], mt_texts[i])
+        for i in range(len(mt_texts))
+    )
+
+    if notes is not None:
+        return group_post_edit_with_notes_prompt_templates.format(
+            source_lang=source_lang,
+            target_lang=target_lang,
+            source_text=source_text,
+            candidate_prompts=candidate_prompts,
+            notes=notes,
+        )
+    else:
+        return group_post_edit_prompt_templates.format(
+            source_lang=source_lang,
+            target_lang=target_lang,
+            source_text=source_text,
+            candidate_prompts=candidate_prompts,
+        )
+
+
 post_edit_prompt_templates = """You are a translation post-editing agent.
 
 Your task is to improve a given translation candidate using the source text and the provided translation notes. The notes come from an earlier translation-prep stage and should be treated as the primary editing guidance.

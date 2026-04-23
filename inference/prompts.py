@@ -100,7 +100,7 @@ def get_GQM_with_notes_prompt(
 
 
 
-group_post_edit_with_notes_prompt_templates = """You are a translation post-editing agent.
+oss_group_post_edit_with_notes_prompt_templates = """You are a translation post-editing agent.
 
 Your task is to produce a final improved translation in the target language by:
 - using the provided source text,
@@ -159,7 +159,7 @@ Notes:
 ```
 """
 
-group_post_edit_prompt_templates = """You are a translation post-editing agent.
+oss_group_post_edit_prompt_templates = """You are a translation post-editing agent.
 
 Your task is to produce a final improved translation in the target language by:
 - using the provided source text,
@@ -228,7 +228,7 @@ def get_oss_group_post_edit_prompt(
     )
 
     if notes is not None:
-        return group_post_edit_with_notes_prompt_templates.format(
+        return oss_group_post_edit_with_notes_prompt_templates.format(
             source_lang=source_lang,
             target_lang=target_lang,
             source_text=source_text,
@@ -236,7 +236,7 @@ def get_oss_group_post_edit_prompt(
             notes=notes,
         )
     else:
-        return group_post_edit_prompt_templates.format(
+        return oss_group_post_edit_prompt_templates.format(
             source_lang=source_lang,
             target_lang=target_lang,
             source_text=source_text,

@@ -100,7 +100,7 @@ def get_GQM_with_notes_prompt(
 
 
 
-group_post_edit_prompt_templates = """You are a translation post-editing agent.
+group_post_edit_with_notes_prompt_templates = """You are a translation post-editing agent.
 
 Your task is to produce a final improved translation in the target language by:
 - using the provided source text,
@@ -159,6 +159,50 @@ Notes:
 ```
 """
 
+group_post_edit_prompt_templates = """You are a translation post-editing agent.
+
+Your task is to produce a final improved translation in the target language by:
+- using the provided source text,
+- reviewing the available translation candidates,
+- and selecting or carefully combining the best parts of the candidates.
+
+You will receive:
+- source language
+- target language
+- source text
+- 1 to 4 translation candidates
+
+Your job:
+1. Read the source text carefully.
+2. Compare the translation candidates against the source text.
+3. Identify which candidate is the best base, or whether a careful combination of candidates is needed.
+4. Perform minimal, targeted post-editing to produce the best final translation.
+5. Prioritize correctness, faithfulness, fluency, consistency, and naturalness in the target language.
+6. Do not produce multiple alternative translations.
+
+Be especially careful about:
+- preserving meaning from the source text
+- resolving omissions, mistranslations, and overtranslations
+- choosing the most accurate wording among candidates
+- maintaining grammatical correctness and fluency
+- improving your translation if necessary
+
+Output format requirements:
+1. Output the final post-edited translation as a single code block.
+2. Inside that code block, output only the final translation and nothing else.
+
+Now perform the task on the following input.
+
+Source language: {source_lang}
+Target language: {target_lang}
+
+Source text:
+```
+{source_text}
+```
+
+{candidate_prompts}
+"""
 
 
 def get_group_post_edit_prompt(
@@ -166,7 +210,7 @@ def get_group_post_edit_prompt(
     target_lang,
     source_text,
     mt_texts,
-    notes: str,
+    notes: str = None,
     ):
     if len(source_lang) != 2:
         source_lang = LANG_MAP[source_lang]
@@ -183,13 +227,21 @@ def get_group_post_edit_prompt(
         for i in range(len(mt_texts))
     )
 
-    return group_post_edit_prompt_templates.format(
-        source_lang=source_lang,
-        target_lang=target_lang,
-        source_text=source_text,
-        candidate_prompts=candidate_prompts,
-        notes=notes,
-    )
+    if notes is not None:
+        return group_post_edit_with_notes_prompt_templates.format(
+            source_lang=source_lang,
+            target_lang=target_lang,
+            source_text=source_text,
+            candidate_prompts=candidate_prompts,
+            notes=notes,
+        )
+    else:
+        return group_post_edit_prompt_templates.format(
+            source_lang=source_lang,
+            target_lang=target_lang,
+            source_text=source_text,
+            candidate_prompts=candidate_prompts,
+        )
 
 
 post_edit_prompt_templates = """You are a translation post-editing agent.

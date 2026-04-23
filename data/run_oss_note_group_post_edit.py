@@ -9,6 +9,7 @@ def main(
     output_path: str,
     mt_key: str,
     notes_key: str,
+    src_key: str = "src_text",
     src_lang_key: str = "src_lang",
     trg_lang_key: str = "trg_lang",
     difficulty_filter: int = 0,
@@ -49,7 +50,7 @@ def main(
         active_notes = [notes_list[i] for i in active_indices]
 
         out = func_call(
-            src_list=active_df["src_text"].tolist(),
+            src_list=active_df[src_key].tolist(),
             mt_list=active_df[mt_key].tolist(),
             notes_list=active_notes,
             src_langs=active_df[src_lang_key].tolist(),

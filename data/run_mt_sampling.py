@@ -6,6 +6,7 @@ from inference.run_mt import func_call
 def main(
     data_path: str,
     output_path: str,
+    src_key: str = "src_text",
     src_lang_key: str = "src_lang",
     trg_lang_key: str = "trg_lang",
     sampling_n: int = 5,
@@ -22,7 +23,7 @@ def main(
     df = pd.read_parquet(data_path)
 
     out = func_call(
-        src_list=df["src_text"].tolist(),
+        src_list=df[src_key].tolist(),
         src_langs=df[src_lang_key].tolist(),
         trg_langs=df[trg_lang_key].tolist(),
         sampling_n=sampling_n,

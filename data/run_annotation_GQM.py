@@ -3,7 +3,7 @@ import pandas as pd
 import fire
 import numpy as np
 
-def process_scores(df: pd.DataFrame, text_col: str, score_col: str, analysis_col: str, model: str, **kwargs) -> pd.DataFrame:
+def process_scores(df: pd.DataFrame, text_col: str, score_col: str, analysis_col: str, model: str, src_key: str = "src_text", **kwargs) -> pd.DataFrame:
     """
     Checks for existing scores and only processes rows with NaN values if the
     score column already exists.
@@ -39,7 +39,7 @@ def process_scores(df: pd.DataFrame, text_col: str, score_col: str, analysis_col
         return df
 
     # 3. Extract data for processing from the 'todo_df'
-    src_texts = todo_df["src_text"].tolist()
+    src_texts = todo_df[src_key].tolist()
     mt_texts = todo_df[text_col].tolist()
     src_langs = todo_df["src_lang"].tolist()
     trg_langs = todo_df["trg_lang"].tolist()
@@ -77,7 +77,7 @@ def process_scores(df: pd.DataFrame, text_col: str, score_col: str, analysis_col
     return df
 
 
-def main(data_path: str, output_path: str, text_key: str, score_key: str, analysis_key: str, model: str = "gemini-2.5-pro"):
+def main(data_path: str, output_path: str, text_key: str, score_key: str, analysis_key: str, model: str = "gemini-2.5-pro", src_key: str = "src_text"):
     assert output_path.endswith(".parquet")
     df = pd.read_parquet(data_path)
 
@@ -93,6 +93,7 @@ def main(data_path: str, output_path: str, text_key: str, score_key: str, analys
         score_col=score_key,
         analysis_col=analysis_key,
         model=model,
+        src_key=src_key,
         **llm_params
     )
     

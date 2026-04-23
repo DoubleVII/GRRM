@@ -11,6 +11,7 @@ def main(
     output_path: str,
     mt_key: str,
     notes_key: str,
+    src_key: str = "src_text",
     src_lang_key: str = "src_lang",
     trg_lang_key: str = "trg_lang",
     difficulty_filter: int = 0,
@@ -71,7 +72,7 @@ def main(
         active_notes = [n for n, m in zip(notes_list, active_mask) if m]
 
         mt_flat, mt_count = flat_list(active_df[mt_key].tolist())
-        src_flat = repeat_text(active_df["src_text"].tolist(), mt_count)
+        src_flat = repeat_text(active_df[src_key].tolist(), mt_count)
         src_lang_flat = repeat_text(active_df[src_lang_key].tolist(), mt_count)
         trg_lang_flat = repeat_text(active_df[trg_lang_key].tolist(), mt_count)
         notes_flat = repeat_text(active_notes, mt_count)

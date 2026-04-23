@@ -38,6 +38,8 @@ def _block_extractor(response:str) -> dict:
     return {"analysis": analysis, "notes": notes}
 
 def _difficulty_extractor(response:str) -> int:
+    if not response:
+        raise ValueError(f"Difficulty score not found in response")
     response = response.strip()
     lines = response.split("\n")
     for line in lines[::-1]:

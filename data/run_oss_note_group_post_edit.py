@@ -24,52 +24,32 @@ def main(
 
     df = pd.read_parquet(data_path)
 
-    # Apply difficulty filter: skip rows below threshold
-    active_mask = []
+    # Set notes to None for rows below difficulty threshold
     notes_list = []
     for _, row in df.iterrows():
         if difficulty_filter > 0 and difficulty_key:
             difficulty = row.get(difficulty_key, 0)
             if difficulty < difficulty_filter:
-                active_mask.append(False)
                 notes_list.append(None)
                 continue
-        active_mask.append(True)
         notes_list.append(row[notes_key])
 
-    # Initialize output with defaults for filtered rows
-    n = len(df)
-    all_pe_mt = [None] * n
-    all_pe_response = [None] * n
-    all_pe_thinking = [None] * n
+    out = func_call(
+        src_list=df[src_key].tolist(),
+        mt_list=df[mt_key].tolist(),
+        notes_list=notes_list,
+        src_langs=df[src_lang_key].tolist(),
+        trg_langs=df[trg_lang_key].tolist(),
+        temperature=temperature,
+        top_p=top_p,
+        retry=retry,
+        model_path=model_path,
+        reasoning_effort=reasoning_effort,
+    )
 
-    # Process active rows only
-    if any(active_mask):
-        active_indices = [i for i, m in enumerate(active_mask) if m]
-        active_df = df.iloc[active_indices]
-        active_notes = [notes_list[i] for i in active_indices]
-
-        out = func_call(
-            src_list=active_df[src_key].tolist(),
-            mt_list=active_df[mt_key].tolist(),
-            notes_list=active_notes,
-            src_langs=active_df[src_lang_key].tolist(),
-            trg_langs=active_df[trg_lang_key].tolist(),
-            temperature=temperature,
-            top_p=top_p,
-            retry=retry,
-            model_path=model_path,
-            reasoning_effort=reasoning_effort,
-        )
-
-        for j, i in enumerate(active_indices):
-            all_pe_mt[i] = out["post_edit_mt"][j]
-            all_pe_response[i] = out["response"][j]
-            all_pe_thinking[i] = out["thinking"][j]
-
-    df["pe_mt"] = all_pe_mt
-    df["pe_response"] = all_pe_response
-    df["pe_thinking"] = all_pe_thinking
+    df["pe_mt"] = out["post_edit_mt"]
+    df["pe_response"] = out["response"]
+    df["pe_thinking"] = out["thinking"]
 
     print(f"Saving to {output_path}")
     df.to_parquet(output_path)

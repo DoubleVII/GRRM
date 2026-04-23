@@ -212,9 +212,9 @@ def get_oss_group_post_edit_prompt(
     mt_texts,
     notes: str = None,
     ):
-    if len(source_lang) != 2:
+    if len(source_lang) == 2:
         source_lang = LANG_MAP[source_lang]
-    if len(target_lang) != 2:
+    if len(target_lang) == 2:
         target_lang = LANG_MAP[target_lang]
     if len(mt_texts) == 1:
         raise ValueError("Only support multiple candidates.")
@@ -314,9 +314,9 @@ def get_group_post_edit_prompt(
     mt_texts,
     notes: str = None,
     ):
-    if len(source_lang) != 2:
+    if len(source_lang) == 2:
         source_lang = LANG_MAP[source_lang]
-    if len(target_lang) != 2:
+    if len(target_lang) == 2:
         target_lang = LANG_MAP[target_lang]
     if len(mt_texts) == 1:
         raise ValueError("Only support multiple candidates.")
@@ -402,9 +402,9 @@ Notes:
 
 
 def get_post_edit_prompt(source_lang, target_lang, source_text, mt_text, notes):
-    if len(source_lang) != 2:
+    if len(source_lang) == 2:
         source_lang = LANG_MAP[source_lang]
-    if len(target_lang) != 2:
+    if len(target_lang) == 2:
         target_lang = LANG_MAP[target_lang]
     return post_edit_prompt_templates.format(
         source_lang=source_lang,

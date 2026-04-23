@@ -66,6 +66,8 @@ def extract_response(response: str):
     extract_out = _block_extractor(response)
     analysis = extract_out["analysis"]
     notes = extract_out["notes"]
+    if not analysis:
+        return None
     try:
         difficulty = _difficulty_extractor(analysis)
     except ValueError as e:

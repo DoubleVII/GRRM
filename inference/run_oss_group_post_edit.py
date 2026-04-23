@@ -12,7 +12,7 @@ from openai_harmony import (
 from utils.config import LANG_MAP
 from inference.run_oss_SQM import init_oss_model, load_encoding
 from inference.run_mt import _block_extractor
-from inference.prompts import get_group_post_edit_prompt
+from inference.prompts import get_oss_group_post_edit_prompt
 
 
 def extract_response(response: str):
@@ -49,7 +49,7 @@ def prepare_vllm_inputs(
     for src_text, mt_texts, notes, src_lang, trg_lang in zip(
         src_list, mt_list, notes_list, src_langs, trg_langs
     ):
-        prompt = get_group_post_edit_prompt(src_lang, trg_lang, src_text, mt_texts, notes)
+        prompt = get_oss_group_post_edit_prompt(src_lang, trg_lang, src_text, mt_texts, notes)
         convo = Conversation.from_messages([
             Message.from_role_and_content(Role.SYSTEM, system_content),
             Message.from_role_and_content(Role.USER, prompt),

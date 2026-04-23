@@ -205,7 +205,7 @@ Source text:
 """
 
 
-def get_group_post_edit_prompt(
+def get_oss_group_post_edit_prompt(
     source_lang,
     target_lang,
     source_text,

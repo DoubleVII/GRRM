@@ -142,6 +142,78 @@ def save_results_to_json(
 
 
 
+def _load_datasets(
+    data_id_list: tuple[str, ...],
+) -> tuple[pd.DataFrame, dict[str, tuple[int, int]], dict[str, str], dict[str, pd.DataFrame]]:
+    """Load and concatenate all parquets for the given data_ids.
+
+    Returns:
+        df_all: concatenated DataFrame with a ``_data_id`` column.
+        boundaries: ``{data_id: (start_idx, end_idx)}`` into df_all rows.
+        lang_pairs: ``{data_id: "src2trg"}`` from config.
+        dfs_per_id: ``{data_id: original DataFrame}`` for save_results.
+    """
+    frames: list[pd.DataFrame] = []
+    boundaries: dict[str, tuple[int, int]] = {}
+    lang_pairs: dict[str, str] = {}
+    dfs_per_id: dict[str, pd.DataFrame] = {}
+
+    offset = 0
+    for did in data_id_list:
+        if did not in MT_TEST_DATA_META_INFO:
+            raise ValueError(
+                f"data_id {did} not in MT_TEST_DATA_META_INFO: {MT_TEST_DATA_META_INFO.keys()}"
+            )
+        meta = MT_TEST_DATA_META_INFO[did]
+        data_path = Path(meta["path"])
+        if not data_path.exists():
+            raise ValueError(f"data_path {data_path} does not exist")
+
+        df = pd.read_parquet(data_path)
+        df["_data_id"] = did
+        n = len(df)
+        boundaries[did] = (offset, offset + n)
+        lang_pairs[did] = f"{meta['src_lang']}2{meta['trg_lang']}"
+        dfs_per_id[did] = df
+
+        frames.append(df)
+        offset += n
+
+    df_all = pd.concat(frames, ignore_index=True)
+    return df_all, boundaries, lang_pairs, dfs_per_id
+
+
+def _split_scores_by_data_id(
+    scores_flat: list[float],
+    boundaries: dict[str, tuple[int, int]],
+    total_n: int,
+    runs: int,
+) -> dict[str, dict]:
+    """Split flat run-major scores back per data_id and compute averages.
+
+    Args:
+        scores_flat: length ``runs * total_n``, run-major order.
+        boundaries: ``{data_id: (start, end)}`` into the total_n items.
+        total_n: total number of items across all data_ids.
+        runs: number of inference runs.
+
+    Returns:
+        ``{data_id: {"avg": float, "none_count": int, "per_item_avgs": list}}``
+    """
+    results: dict[str, dict] = {}
+    for did, (start, end) in boundaries.items():
+        n = end - start
+        # Collect scores for this data_id across all runs (run-major order)
+        did_scores: list[float] = []
+        for r in range(runs):
+            did_scores.extend(scores_flat[r * total_n + start : r * total_n + end])
+
+        avg, none_count = _average_overall(did_scores)
+        per_item_avgs = _average_per_item(did_scores, n, runs)
+        results[did] = {"avg": avg, "none_count": none_count, "per_item_avgs": per_item_avgs}
+    return results
+
+
 def run_inference(
     df: pd.DataFrame,
     model,
@@ -152,39 +224,47 @@ def run_inference(
     max_new_tokens: int,
     prompt_type: str,
     runs: int,
-):
+) -> list[str]:
+    """Run MT inference on the concatenated dataset, single batched call.
+
+    Returns:
+        Flat list of length ``runs * len(df)`` in run-major order.
+    """
     import inference.run_mt as run_mt
 
     src_list = df["src_text"].tolist()
     src_langs = df["src_lang"].tolist()
     trg_langs = df["trg_lang"].tolist()
 
-    mt_list_for_runs = []
-    for _ in range(runs):        
-        func_call_kwargs = {
-            "model_path": model_path,
-            "src_list": src_list,
-            "src_langs": src_langs,
-            "trg_langs": trg_langs,
-            "temperature": temperature,
-            "top_p": top_p,
-            "max_new_tokens": max_new_tokens,
-            "prompt_type": prompt_type,
-            "model": model,
-            "tokenizer": tokenizer,
-        }
-        if "Seed-X" in model_path:
-            func_call_kwargs["use_chat_template"] = False
-        output_dict = run_mt.func_call(**func_call_kwargs)
-        mt_list = output_dict["responses"]
-        if len(mt_list) != len(df):
-            raise ValueError(
-                f"mt_list must have the same length as src_list, but got {len(mt_list)} and {len(df)}"
-            )
+    flat_src = src_list * runs
+    flat_src_langs = src_langs * runs
+    flat_trg_langs = trg_langs * runs
 
-        mt_list_for_runs.append(mt_list)
+    func_call_kwargs = {
+        "model_path": model_path,
+        "src_list": flat_src,
+        "src_langs": flat_src_langs,
+        "trg_langs": flat_trg_langs,
+        "temperature": temperature,
+        "top_p": top_p,
+        "max_new_tokens": max_new_tokens,
+        "prompt_type": prompt_type,
+        "model": model,
+        "tokenizer": tokenizer,
+    }
+    if "Seed-X" in model_path:
+        func_call_kwargs["use_chat_template"] = False
+    output_dict = run_mt.func_call(**func_call_kwargs)
+    mt_flat = output_dict["responses"]
 
-    return mt_list_for_runs
+    expected_len = runs * len(df)
+    if len(mt_flat) != expected_len:
+        raise ValueError(
+            f"mt_flat must have length {expected_len} (runs={runs} * items={len(df)}), "
+            f"but got {len(mt_flat)}"
+        )
+
+    return mt_flat
 
 
 def _normalize_metric_output(output: Any, n_items: int, n_runs: int) -> list[float]:
@@ -247,77 +327,90 @@ def _average_per_item(scores: list[float], n_items: int, n_runs: int) -> list[Op
 
 def run_bleurt_eval(
     df: pd.DataFrame,
-    mt_list_for_runs: list[list[str]],
+    mt_flat: list[str],
     runs: int,
     bleurt_model_path: Optional[str] = None,
-) -> tuple[float, int, list[Optional[float]]]:
-    mt_list_for_runs = [item for sublist in mt_list_for_runs for item in sublist]
+) -> list[float]:
+    """Run BLEURT evaluation on the concatenated dataset, single batched call.
 
-    n = len(df)
-    if n == 0:
+    Args:
+        df: concatenated DataFrame.
+        mt_flat: flat predictions, length ``runs * len(df)``, run-major order.
+        runs: number of inference runs.
+        bleurt_model_path: path to the BLEURT model checkpoint.
+
+    Returns:
+        Flat BLEURT scores, length ``runs * len(df)``, run-major order.
+    """
+    N = len(df)
+    if N == 0:
         raise ValueError("Input data is empty: df has 0 rows")
 
-    ref_mt_list = df["trg_text"].tolist()
-    refs_flat = ref_mt_list * runs
+    ref_list = df["trg_text"].tolist()
+    flat_ref = ref_list * runs
 
     try:
         import eval.bleurt_eval_cli as bleurt_eval_cli
     except Exception as e:
         raise ImportError(f"BLEURT metric requested but bleurt_eval_cli not found: {e}")
     bleurt_path = bleurt_model_path if bleurt_model_path is not None else "BLEURT-20"
-    bleurt_output = bleurt_eval_cli.func_call(bleurt_path, mt_list_for_runs, refs_flat)
-    bleurt_scores_flat = _normalize_metric_output(bleurt_output, n, runs)
-    avg, none_count = _average_overall(bleurt_scores_flat)
-    per_item_metric_avgs = _average_per_item(bleurt_scores_flat, n, runs)
-
-    return avg, none_count, per_item_metric_avgs
+    bleurt_output = bleurt_eval_cli.func_call(bleurt_path, mt_flat, flat_ref)
+    return _normalize_metric_output(bleurt_output, N, runs)
 
 def run_oss_eval(
     df: pd.DataFrame,
-    mt_list_for_runs: list[list[str]],
+    mt_flat: list[str],
     runs: int,
     oss_model,
     oss_model_path: Optional[str] = None,
-) -> tuple[float, int, list[Optional[float]]]:
-    mt_list_for_runs = [item for sublist in mt_list_for_runs for item in sublist]
+) -> list[float]:
+    """Run OSS evaluation on the concatenated dataset, single batched call.
 
-    n = len(df)
-    if n == 0:
+    Args:
+        df: concatenated DataFrame.
+        mt_flat: flat predictions, length ``runs * len(df)``, run-major order.
+        runs: number of inference runs.
+        oss_model: loaded vLLM model for OSS.
+        oss_model_path: path to the OSS model checkpoint.
+
+    Returns:
+        Flat OSS scores, length ``runs * len(df)``, run-major order.
+    """
+    N = len(df)
+    if N == 0:
         raise ValueError("Input data is empty: df has 0 rows")
 
-    ref_mt_list = df["trg_text"].tolist()
-    refs_flat = ref_mt_list * runs
-
+    ref_list = df["trg_text"].tolist()
+    src_list = df["src_text"].tolist()
     src_langs = df["src_lang"].tolist()
     trg_langs = df["trg_lang"].tolist()
-    src_texts = df["src_text"].tolist()
 
-    src_flat = src_texts * runs
-    src_langs_flat = src_langs * runs
-    trg_langs_flat = trg_langs * runs
-
+    # Handle comment column per-row
     if "comment" in df.columns:
         comment_list = df["comment"].tolist()
-        ref_hint_list = [f"{ref}\n评估重点：\n{comment}" for ref, comment in zip(refs_flat, comment_list)]
-        ref_hint_flat = ref_hint_list * runs
+        ref_for_oss = [
+            f"{ref}\n评估重点：\n{comment}" if pd.notna(comment) else ref
+            for ref, comment in zip(ref_list, comment_list)
+        ]
     else:
-        ref_hint_flat = None
+        ref_for_oss = ref_list
+
+    flat_ref = ref_for_oss * runs
+    flat_src = src_list * runs
+    flat_src_langs = src_langs * runs
+    flat_trg_langs = trg_langs * runs
 
     model_path = oss_model_path if oss_model_path is not None else "openai/gpt-oss-120b"
     oss_output = run_oss_SQM.func_call(
-        src_list=src_flat,
-        mt_list=mt_list_for_runs,
-        src_langs=src_langs_flat,
-        trg_langs=trg_langs_flat,
-        ref_list=ref_hint_flat if ref_hint_flat is not None else refs_flat,
+        src_list=flat_src,
+        mt_list=mt_flat,
+        src_langs=flat_src_langs,
+        trg_langs=flat_trg_langs,
+        ref_list=flat_ref,
         model=oss_model,
         model_path=model_path,
     )
-    oss_scores_flat = _normalize_metric_output(oss_output, n, runs)
-    avg, none_count = _average_overall(oss_scores_flat)
-    per_item_metric_avgs = _average_per_item(oss_scores_flat, n, runs)
-
-    return avg, none_count, per_item_metric_avgs
+    return _normalize_metric_output(oss_output, N, runs)
 
 
 def _clear_mem():
@@ -349,100 +442,63 @@ def main(
     """
     Run machine translation evaluation for a model on specified datasets.
 
-    This function performs a two-stage evaluation pipeline:
-    1. Inference stage: Load the MT model and generate translations for all datasets
-    2. Evaluation stage: Release the MT model, load evaluation models (e.g., OSS),
-       and compute metrics on the generated translations.
-
-    Results are logged to Weights & Biases and optionally saved to JSON files.
+    All datasets are concatenated and processed in single batched calls for both
+    inference and evaluation, then results are split back per dataset for reporting.
 
     Args:
         data_id: One or more dataset identifiers from MT_TEST_DATA_META_INFO.
             Can be a single string (comma-separated), tuple, or iterable of dataset IDs.
         model_path: Path to the pretrained MT model weights.
         model_name: Name of the model for logging and output file naming.
-        temperature: Sampling temperature for generation. Higher values produce more
-            random outputs. Defaults to 0.4.
+        temperature: Sampling temperature for generation. Defaults to 0.4.
         top_p: Nucleus sampling probability threshold. Defaults to 0.7.
         max_new_tokens: Maximum number of tokens to generate per translation.
             Defaults to 4096.
-        metrics: List of evaluation metrics to compute. Supported values are
-            'bleurt' and 'oss'. The OSS model version can be specified via
-            oss_model_path in kwargs. Defaults to ["bleurt", "oss"].
-        prompt_type: Type of prompt template (and model output parser) to use for translation.
-            Defaults to "codeblock-think".
-        runs: Number of inference runs to perform for each sample. Multiple runs
-            can be used to assess model consistency. Defaults to 1.
-        save_results: Whether to save detailed results (predictions, per-item metrics)
-            to JSON files in the current directory. Defaults to False.
-        **kwargs: Additional keyword arguments. Supported keys:
-            - bleurt_model_path: Path to the BLEURT model. If not provided, defaults to "BLEURT-20".
-            - oss_model_path: Path to the gpt-oss model. If not provided, defaults to "openai/gpt-oss-120b".
-            - mt_vllm_kwargs: Dictionary of parameters to pass to vLLM initialization for the MT model,
-              such as gpu_memory_utilization, quantization, etc.
-            - oss_vllm_kwargs: Dictionary of parameters to pass to vLLM initialization for the OSS model,
-              such as gpu_memory_utilization, quantization, etc.
-
-    Raises:
-        ValueError: If data_id is empty or contains invalid dataset identifiers.
-        ValueError: If the specified data path does not exist.
-        ImportError: If BLEURT metric is requested but bleurt_eval_cli is not found.
+        metrics: List of evaluation metrics to compute. Supported: 'bleurt', 'oss'.
+            Defaults to ["bleurt", "oss"].
+        prompt_type: Type of prompt template. Defaults to "codeblock-think".
+        runs: Number of inference runs per sample. Defaults to 1.
+        save_results: Whether to save per-item results to JSON. Defaults to False.
+        **kwargs: Additional keyword arguments:
+            - bleurt_model_path: Path to BLEURT model.
+            - oss_model_path: Path to gpt-oss model.
+            - mt_vllm_kwargs: vLLM kwargs for the MT model.
+            - oss_vllm_kwargs: vLLM kwargs for the OSS model.
     """
-    if isinstance(data_id, Iterable):
-        data_id_list = tuple(data_id)
-    elif isinstance(data_id, str):
-        data_id_list = tuple(data_id.strip().split(","))
-    
+    # Parse data_id input
     if isinstance(data_id, str):
         data_id_list = tuple(data_id.strip().split(","))
     elif isinstance(data_id, Iterable):
         data_id_list = tuple(data_id)
     else:
-        data_id_list = tuple(data_id)
-    
+        data_id_list = (data_id,)
+
     if not data_id_list:
-        raise ValueError(f"Invalid data_id. Please provide at least one valid data_id from {MT_TEST_DATA_META_INFO.keys()}")
+        raise ValueError(
+            f"Invalid data_id. Please provide at least one valid data_id from {MT_TEST_DATA_META_INFO.keys()}"
+        )
 
+    # Load and concatenate all datasets
+    df_all, boundaries, lang_pairs, dfs_per_id = _load_datasets(data_id_list)
+    N = len(df_all)
 
-    # Load MT model once and reuse, avoiding repeated loading in run_inference
+    # Stage 1: Inference — single batched call across all data_ids and runs
     mt_vllm_kwargs = kwargs.get("mt_vllm_kwargs", {})
     model, tokenizer = load_model_tokenizer(model_path, **mt_vllm_kwargs)
 
-    # Stage 1: Run translation inference on all datasets first, avoiding interleaving with evaluation (especially OSS)
-    dfs: Dict[str, pd.DataFrame] = {}
-    mt_lists_for_runs: Dict[str, list[list[str]]] = {}
-    lang_pairs: Dict[str, str] = {}
+    mt_flat = run_inference(
+        df_all,
+        model,
+        tokenizer,
+        model_path,
+        temperature,
+        top_p,
+        max_new_tokens,
+        prompt_type=prompt_type,
+        runs=runs,
+    )
 
-    for did in data_id_list:
-        if did not in MT_TEST_DATA_META_INFO:
-            raise ValueError(
-                f"data_id {did} not in MT_TEST_DATA_META_INFO: {MT_TEST_DATA_META_INFO.keys()}"
-            )
-        data_meta_info = MT_TEST_DATA_META_INFO[did]
-        data_path = Path(data_meta_info["path"])
-        lang_pair = f"{data_meta_info['src_lang']}2{data_meta_info['trg_lang']}"
-
-        if not data_path.exists():
-            raise ValueError(f"data_path {data_path} does not exist")
-
-        df = pd.read_parquet(data_path)
-        dfs[did] = df
-        lang_pairs[did] = lang_pair
-
-        mt_list_for_runs = run_inference(
-            df,
-            model,
-            tokenizer,
-            model_path,
-            temperature,
-            top_p,
-            max_new_tokens,
-            prompt_type=prompt_type,
-            runs=runs,
-        )
-        mt_lists_for_runs[did] = mt_list_for_runs
-
-    # MT inference stage complete, release MT model to free GPU memory for OSS evaluation
+    # Release MT model to free GPU memory
     try:
         del model
         del tokenizer
@@ -454,85 +510,82 @@ def main(
     bleurt_model_path = kwargs.get("bleurt_model_path")
     oss_model_path = kwargs.get("oss_model_path")
 
-    # Stage 2: Evaluate by metric groups, first all bleurt, then all oss
+    # Stage 2: Evaluation — single batched call per metric
     datasets_metric_results: Dict[str, Dict[str, float]] = {did: {} for did in data_id_list}
     datasets_metric_none_counts: Dict[str, Dict[str, int]] = {did: {} for did in data_id_list}
-    datasets_per_item_metric_avgs: Dict[str, Dict[str, list[Optional[float]]]] = {did: {} for did in data_id_list}
+    datasets_per_item_metric_avgs: Dict[str, Dict[str, list[Optional[float]]]] = {
+        did: {} for did in data_id_list
+    }
     datasets_valid_metrics: Dict[str, List[str]] = {did: [] for did in data_id_list}
 
     all_valid_metrics: List[str] = []
     seen_metrics = set()
 
-    # First run OSS evaluation for all datasets
+    # OSS evaluation
     if "oss" in metrics:
         if oss_model_path is None:
             oss_model_path = "openai/gpt-oss-120b"
         oss_vllm_kwargs = kwargs.get("oss_vllm_kwargs", {})
         oss_model = run_oss_SQM.init_oss_model(oss_model_path, **oss_vllm_kwargs)
 
+        oss_scores_flat = run_oss_eval(
+            df_all,
+            mt_flat,
+            runs,
+            oss_model,
+            oss_model_path=oss_model_path,
+        )
+        oss_split = _split_scores_by_data_id(oss_scores_flat, boundaries, N, runs)
+
         for did in data_id_list:
-            df = dfs[did]
-            mt_list_for_runs = mt_lists_for_runs[did]
-
-            avg, none_count, per_item_avgs = run_oss_eval(
-                df,
-                mt_list_for_runs,
-                runs,
-                oss_model,
-                oss_model_path=oss_model_path,
-            )
-
-            datasets_metric_results[did]["oss"] = avg
-            datasets_metric_none_counts[did]["oss"] = none_count
-            datasets_per_item_metric_avgs[did]["oss"] = per_item_avgs
+            datasets_metric_results[did]["oss"] = oss_split[did]["avg"]
+            datasets_metric_none_counts[did]["oss"] = oss_split[did]["none_count"]
+            datasets_per_item_metric_avgs[did]["oss"] = oss_split[did]["per_item_avgs"]
             datasets_valid_metrics[did].append("oss")
 
-            if "oss" not in seen_metrics:
-                seen_metrics.add("oss")
-                all_valid_metrics.append("oss")
+        if "oss" not in seen_metrics:
+            seen_metrics.add("oss")
+            all_valid_metrics.append("oss")
 
-        # Release OSS model
         try:
             del oss_model
             _clear_mem()
         except Exception:
             pass
 
-    # Then run BLEURT evaluation for all datasets
+    # BLEURT evaluation
     if "bleurt" in metrics:
+        bleurt_scores_flat = run_bleurt_eval(
+            df_all,
+            mt_flat,
+            runs,
+            bleurt_model_path=bleurt_model_path,
+        )
+        bleurt_split = _split_scores_by_data_id(bleurt_scores_flat, boundaries, N, runs)
+
         for did in data_id_list:
-            df = dfs[did]
-            mt_list_for_runs = mt_lists_for_runs[did]
-
-            avg, none_count, per_item_avgs = run_bleurt_eval(
-                df,
-                mt_list_for_runs,
-                runs,
-                bleurt_model_path=bleurt_model_path,
-            )
-
-            datasets_metric_results[did]["bleurt"] = avg
-            datasets_metric_none_counts[did]["bleurt"] = none_count
-            datasets_per_item_metric_avgs[did]["bleurt"] = per_item_avgs
+            datasets_metric_results[did]["bleurt"] = bleurt_split[did]["avg"]
+            datasets_metric_none_counts[did]["bleurt"] = bleurt_split[did]["none_count"]
+            datasets_per_item_metric_avgs[did]["bleurt"] = bleurt_split[did]["per_item_avgs"]
             datasets_valid_metrics[did].append("bleurt")
 
-            if "bleurt" not in seen_metrics:
-                seen_metrics.add("bleurt")
-                all_valid_metrics.append("bleurt")
+        if "bleurt" not in seen_metrics:
+            seen_metrics.add("bleurt")
+            all_valid_metrics.append("bleurt")
 
-    # Optionally save all inference results and per-item metric averages to current directory
+    # Optionally save per-data_id results
     if save_results:
-        for did in data_id_list:
-            df = dfs[did]
-            mt_list_for_runs = mt_lists_for_runs[did]
-            valid_metrics = datasets_valid_metrics[did]
-            per_item_metric_avgs = datasets_per_item_metric_avgs[did]
-
+        for did, (start, end) in boundaries.items():
+            n = end - start
+            mt_nested = [
+                [mt_flat[r * N + start + i] for i in range(n)]
+                for r in range(runs)
+            ]
             save_results_to_json(
-                df=df,
-                mt_list_for_runs_nested=mt_list_for_runs,
-                per_item_metric_avgs=per_item_metric_avgs,
-                valid_metrics=valid_metrics,
+                df=dfs_per_id[did],
+                mt_list_for_runs_nested=mt_nested,
+                per_item_metric_avgs=datasets_per_item_metric_avgs[did],
+                valid_metrics=datasets_valid_metrics[did],
                 dataset_name=did,
                 model_name=model_name,
                 model_path=model_path,

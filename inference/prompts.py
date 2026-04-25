@@ -318,8 +318,8 @@ def get_group_post_edit_prompt(
         source_lang = LANG_MAP[source_lang]
     if len(target_lang) == 2:
         target_lang = LANG_MAP[target_lang]
-    if len(mt_texts) == 1:
-        raise ValueError("Only support multiple candidates.")
+    # if len(mt_texts) == 1:
+    #     raise ValueError("Only support multiple candidates.")
     if len(mt_texts) > len(candidate_identifiers):
         raise ValueError(f"Only support {len(candidate_identifiers)} candidates.")
 

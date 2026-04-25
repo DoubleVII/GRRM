@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Optional
 import warnings
 from openai_harmony import (
     HarmonyEncoding,
@@ -12,6 +12,15 @@ from inference.run_oss_SQM import init_oss_model, load_encoding
 from inference.run_oss_GQM import extract_response
 from inference.prompts import get_GQM_with_notes_prompt, get_teacher_GQM_with_notes_prompt
 
+
+def post_process_analysis(text: str) -> Optional[str]:
+    """
+    remove "### Final Ranking" and following lines
+    """
+    if "### Final Ranking" not in text:
+        return None
+    ranking_start = text.find("### Final Ranking")
+    return text[:ranking_start]
 
 def prepare_vllm_inputs(
     src_list: list[str],
@@ -83,8 +92,12 @@ def run_generate(
         if res is None:
             results.append(None)
             continue
+        analysis = post_process_analysis(res["analysis"])
+        if analysis is None:
+            results.append(None)
+            continue
         results.append({
-            "analysis": res["analysis"],
+            "analysis": analysis,
             "scores": res["scores"],
             "thinking": think_text,
             "response": resp_text,

@@ -1,7 +1,7 @@
 from typing import Union, List, Optional
 from utils.config import LANG_MAP
 from utils.helpers import get_auto_tp_size
-
+from inference.prompts import build_notes_prompt
 
 def load_model_tokenizer(model_path: str, **vllm_kwargs):
     from vllm import LLM
@@ -100,8 +100,10 @@ def extract_answer(text: str, prompt_type: str):
         return text.strip()
 
 def get_prompt(
-    prompt_type, src_lang, trg_lang, src_text, trg_token: Optional[str] = None
+    prompt_type, src_lang, trg_lang, src_text, trg_token: Optional[str] = None, notes: Optional[str] = None
 ):
+    if notes is not None and prompt_type != "codeblock-think":
+        raise ValueError("only codeblock-think prompt can use notes input")
     
     if len(src_lang) == 2:
         src_lang = LANG_MAP[src_lang]
@@ -123,7 +125,7 @@ def get_prompt(
 Source text:
 ```
 {src_text}
-```
+```{build_notes_prompt(notes)}
 """
     elif prompt_type == "SSR":
         # SSR series models expect a specific conversation-style system prompt.
@@ -161,8 +163,9 @@ def func_call(
     retry: int = 4,
     prompt_type: str = "codeblock-think",
     use_chat_template: bool = True,
-    model = None,
-    tokenizer = None,
+    notes_list: Optional[list[Optional[str]]] = None,
+    model=None,
+    tokenizer=None,
     **kwargs,
 ):
     from vllm import SamplingParams
@@ -175,8 +178,11 @@ def func_call(
     if isinstance(trg_langs, str):
         trg_langs = [trg_langs] * len(src_list)
 
-    if not (len(src_list) == len(src_langs) == len(trg_langs)):
-        raise ValueError("src_list, src_langs, and trg_langs must have the same length.")
+    if notes_list is None:
+        notes_list = [None] * len(src_list)
+
+    if not (len(src_list) == len(src_langs) == len(trg_langs) == len(notes_list)):
+        raise ValueError("src_list, src_langs, trg_langs, and notes_list must have the same length.")
     
     if model is None or tokenizer is None:
         model, tokenizer = load_model_tokenizer(model_path)
@@ -191,8 +197,8 @@ def func_call(
 
     # Build prompts
     prompt_list = []
-    for src_text, src_lang, trg_lang in zip(src_list, src_langs, trg_langs):
-        prompt = get_prompt(prompt_type, src_lang, trg_lang, src_text)
+    for src_text, src_lang, trg_lang, notes in zip(src_list, src_langs, trg_langs, notes_list):
+        prompt = get_prompt(prompt_type, src_lang, trg_lang, src_text, notes=notes)
         if use_chat_template:
             messages = [
                 {"role": "user", "content": prompt},

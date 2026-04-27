@@ -7,13 +7,25 @@ import wandb
 
 from utils.config import MT_TEST_DATA_META_INFO
 import numpy as np
+from utils.helpers import (
+    build_notes_list,
+    split_metrics_by_notes,
+    average_overall,
+    average_per_item,
+    load_datasets_from_dir,
+)
 from inference.run_mt import load_model_tokenizer
 import inference.run_oss_SQM as run_oss_SQM
+
+# Backward-compatible aliases for external importers
+_average_overall = average_overall
+_average_per_item = average_per_item
 
 def log_results_to_wandb(
     datasets_metric_results: Dict[str, Dict[str, float]],
     config: Dict[str, Any],
     datasets_metric_none_counts: Optional[Dict[str, Dict[str, int]]] = None,
+    datasets_metrics_by_notes: Optional[Dict[str, Dict[str, dict]]] = None,
 ):
     """Log results from multiple datasets to wandb as a table.
 
@@ -21,6 +33,8 @@ def log_results_to_wandb(
         datasets_metric_results: {dataset_name: {metric: value}}
         config: wandb config
         datasets_metric_none_counts: {dataset_name: {metric: none_count}}
+        datasets_metrics_by_notes: {data_id: {metric: {"all", "notes", "no_notes"}}}
+            When provided, also logs a notes-breakdown table.
     """
 
     project_name = "mt-eval"
@@ -75,6 +89,54 @@ def log_results_to_wandb(
                 except Exception:
                     wandb.run.summary[key] = cnt
 
+    # Log notes-breakdown table and summary
+    if datasets_metrics_by_notes:
+        cfg_metrics = config.get("metrics") or []
+        notes_metrics = [m for m in cfg_metrics if m in datasets_metrics_by_notes.get(
+            next(iter(datasets_metrics_by_notes)), {}
+        )] if datasets_metrics_by_notes else []
+
+        if not notes_metrics:
+            # Derive from the data
+            seen_m: set[str] = set()
+            notes_metrics = []
+            for did, md in datasets_metrics_by_notes.items():
+                for m in md:
+                    if m not in seen_m:
+                        seen_m.add(m)
+                        notes_metrics.append(m)
+
+        columns_nb = ["data_id"]
+        for m in notes_metrics:
+            columns_nb.extend([f"{m}/all", f"{m}/notes", f"{m}/no_notes"])
+        columns_nb.extend(["notes_count", "no_notes_count"])
+
+        rows_nb: List[List[Any]] = []
+        for data_id, metric_dict in datasets_metrics_by_notes.items():
+            row: List[Any] = [data_id]
+            for m in notes_metrics:
+                split = metric_dict.get(m, {})
+                row.append(split.get("all", {}).get("avg", np.nan))
+                row.append(split.get("notes", {}).get("avg", np.nan))
+                row.append(split.get("no_notes", {}).get("avg", np.nan))
+            first_split = next(iter(metric_dict.values()), {})
+            row.append(first_split.get("notes", {}).get("count", 0))
+            row.append(first_split.get("no_notes", {}).get("count", 0))
+            rows_nb.append(row)
+
+        table_nb = wandb.Table(columns=columns_nb, data=rows_nb)
+        wandb.log({"metrics_by_notes": table_nb})
+
+        for data_id, metric_dict in datasets_metrics_by_notes.items():
+            for m, split in metric_dict.items():
+                for group in ("all", "notes", "no_notes"):
+                    key = f"{data_id}/{m}/{group}"
+                    val = split.get(group, {}).get("avg", np.nan)
+                    wandb.run.summary[key] = val
+            first_split = next(iter(metric_dict.values()), {})
+            wandb.run.summary[f"{data_id}/notes_count"] = first_split.get("notes", {}).get("count", 0)
+            wandb.run.summary[f"{data_id}/no_notes_count"] = first_split.get("no_notes", {}).get("count", 0)
+
 
 def _sanitize_filename_component(s: str) -> str:
     try:
@@ -100,6 +162,9 @@ def save_results_to_json(
     max_new_tokens: int,
     runs: int,
     prompt_type: str,
+    difficulty_filter: int = 0,
+    notes_list_per_item: Optional[list[Optional[str]]] = None,
+    use_notes_mask_per_item: Optional[list[bool]] = None,
 ) -> Path:
     safe_model_name = _sanitize_filename_component(model_name)
     safe_dataset_name = _sanitize_filename_component(dataset_name)
@@ -120,6 +185,8 @@ def save_results_to_json(
             "ref_text": row["trg_text"],
             "predictions": preds,
             "metrics_avg": metrics_avg_item,
+            "notes": notes_list_per_item[i] if notes_list_per_item else None,
+            "use_notes": use_notes_mask_per_item[i] if use_notes_mask_per_item else None,
         })
 
     json_payload = {
@@ -131,6 +198,7 @@ def save_results_to_json(
         "max_new_tokens": max_new_tokens,
         "runs": runs,
         "prompt_type": prompt_type,
+        "difficulty_filter": difficulty_filter,
         "metrics": valid_metrics,
         "items": items,
     }
@@ -224,6 +292,7 @@ def run_inference(
     max_new_tokens: int,
     prompt_type: str,
     runs: int,
+    notes_list: Optional[list[Optional[str]]] = None,
 ) -> list[str]:
     """Run MT inference on the concatenated dataset, single batched call.
 
@@ -251,6 +320,7 @@ def run_inference(
         "prompt_type": prompt_type,
         "model": model,
         "tokenizer": tokenizer,
+        "notes_list": notes_list,
     }
     if "Seed-X" in model_path:
         func_call_kwargs["use_chat_template"] = False
@@ -289,41 +359,6 @@ def _normalize_metric_output(output: Any, n_items: int, n_runs: int) -> list[flo
             return output
 
     raise ValueError(f"Unexpected metric output shape/type: type={type(output)}, len={getattr(output, '__len__', 'NA')}")
-
-def _average_overall(scores: list[float]) -> tuple[float, int]:
-    vals: list[float] = []
-    none_count: int = 0
-    for s in scores:
-        if s is None:
-            none_count += 1
-            continue
-        try:
-            vals.append(float(s))
-        except Exception:
-            none_count += 1
-            continue
-    if not vals:
-        return float("nan"), none_count
-    return sum(vals) / len(vals), none_count
-
-def _average_per_item(scores: list[float], n_items: int, n_runs: int) -> list[Optional[float]]:
-    avgs: list[Optional[float]] = []
-    for i in range(n_items):
-        vals: list[float] = []
-        for r in range(n_runs):
-            idx = r * n_items + i
-            s = scores[idx]
-            if s is None:
-                continue
-            try:
-                vals.append(float(s))
-            except Exception:
-                continue
-        if vals:
-            avgs.append(sum(vals) / len(vals))
-        else:
-            avgs.append(None)
-    return avgs
 
 def run_bleurt_eval(
     df: pd.DataFrame,
@@ -437,6 +472,8 @@ def main(
     prompt_type: str = "codeblock-think",
     runs: int = 1,
     save_results: bool = False,
+    difficulty_filter: int = 0,
+    data_dir: Optional[str] = None,
     **kwargs,
 ):
     """
@@ -459,6 +496,8 @@ def main(
         prompt_type: Type of prompt template. Defaults to "codeblock-think".
         runs: Number of inference runs per sample. Defaults to 1.
         save_results: Whether to save per-item results to JSON. Defaults to False.
+        difficulty_filter: Minimum difficulty score for notes to be used. Items with
+            difficulty below this threshold will have notes set to None. Defaults to 0.
         **kwargs: Additional keyword arguments:
             - bleurt_model_path: Path to BLEURT model.
             - oss_model_path: Path to gpt-oss model.
@@ -479,8 +518,19 @@ def main(
         )
 
     # Load and concatenate all datasets
-    df_all, boundaries, lang_pairs, dfs_per_id = _load_datasets(data_id_list)
+    if data_dir:
+        df_all, boundaries, dfs_per_id = load_datasets_from_dir(data_id_list, data_dir)
+        lang_pairs = {did: "unknown" for did in data_id_list}
+    else:
+        df_all, boundaries, lang_pairs, dfs_per_id = _load_datasets(data_id_list)
     N = len(df_all)
+
+    # Build notes list
+    flat_notes_list, flat_use_notes_mask = build_notes_list(
+        df_all, difficulty_filter, runs
+    )
+    notes_used = sum(flat_use_notes_mask[:N])
+    print(f"Total items: {N}, notes used: {notes_used}/{N} (difficulty_filter={difficulty_filter})")
 
     # Stage 1: Inference — single batched call across all data_ids and runs
     mt_vllm_kwargs = kwargs.get("mt_vllm_kwargs", {})
@@ -496,6 +546,7 @@ def main(
         max_new_tokens,
         prompt_type=prompt_type,
         runs=runs,
+        notes_list=flat_notes_list,
     )
 
     # Release MT model to free GPU memory
@@ -517,6 +568,7 @@ def main(
         did: {} for did in data_id_list
     }
     datasets_valid_metrics: Dict[str, List[str]] = {did: [] for did in data_id_list}
+    datasets_metrics_by_notes: Dict[str, Dict[str, dict]] = {did: {} for did in data_id_list}
 
     all_valid_metrics: List[str] = []
     seen_metrics = set()
@@ -535,12 +587,15 @@ def main(
             oss_model,
             oss_model_path=oss_model_path,
         )
-        oss_split = _split_scores_by_data_id(oss_scores_flat, boundaries, N, runs)
+        oss_notes_split = split_metrics_by_notes(
+            oss_scores_flat, flat_use_notes_mask, boundaries, N, runs
+        )
 
         for did in data_id_list:
-            datasets_metric_results[did]["oss"] = oss_split[did]["avg"]
-            datasets_metric_none_counts[did]["oss"] = oss_split[did]["none_count"]
-            datasets_per_item_metric_avgs[did]["oss"] = oss_split[did]["per_item_avgs"]
+            datasets_metric_results[did]["oss"] = oss_notes_split[did]["all"]["avg"]
+            datasets_metric_none_counts[did]["oss"] = oss_notes_split[did]["all"]["none_count"]
+            datasets_per_item_metric_avgs[did]["oss"] = oss_notes_split[did]["all"]["per_item_avgs"]
+            datasets_metrics_by_notes[did]["oss"] = oss_notes_split[did]
             datasets_valid_metrics[did].append("oss")
 
         if "oss" not in seen_metrics:
@@ -561,17 +616,32 @@ def main(
             runs,
             bleurt_model_path=bleurt_model_path,
         )
-        bleurt_split = _split_scores_by_data_id(bleurt_scores_flat, boundaries, N, runs)
+        bleurt_notes_split = split_metrics_by_notes(
+            bleurt_scores_flat, flat_use_notes_mask, boundaries, N, runs
+        )
 
         for did in data_id_list:
-            datasets_metric_results[did]["bleurt"] = bleurt_split[did]["avg"]
-            datasets_metric_none_counts[did]["bleurt"] = bleurt_split[did]["none_count"]
-            datasets_per_item_metric_avgs[did]["bleurt"] = bleurt_split[did]["per_item_avgs"]
+            datasets_metric_results[did]["bleurt"] = bleurt_notes_split[did]["all"]["avg"]
+            datasets_metric_none_counts[did]["bleurt"] = bleurt_notes_split[did]["all"]["none_count"]
+            datasets_per_item_metric_avgs[did]["bleurt"] = bleurt_notes_split[did]["all"]["per_item_avgs"]
+            datasets_metrics_by_notes[did]["bleurt"] = bleurt_notes_split[did]
             datasets_valid_metrics[did].append("bleurt")
 
         if "bleurt" not in seen_metrics:
             seen_metrics.add("bleurt")
             all_valid_metrics.append("bleurt")
+
+    # Print summary
+    for did in data_id_list:
+        print(f"\n=== {did} ===")
+        for m in datasets_valid_metrics[did]:
+            split = datasets_metrics_by_notes[did][m]
+            all_avg = split["all"]["avg"]
+            notes_avg = split["notes"]["avg"]
+            no_notes_avg = split["no_notes"]["avg"]
+            notes_cnt = split["notes"]["count"]
+            no_notes_cnt = split["no_notes"]["count"]
+            print(f"  {m}: all={all_avg:.4f} | notes({notes_cnt})={notes_avg:.4f} | no_notes({no_notes_cnt})={no_notes_avg:.4f}")
 
     # Optionally save per-data_id results
     if save_results:
@@ -581,6 +651,8 @@ def main(
                 [mt_flat[r * N + start + i] for i in range(n)]
                 for r in range(runs)
             ]
+            notes_per_item = flat_notes_list[start:end]
+            mask_per_item = flat_use_notes_mask[start:end]
             save_results_to_json(
                 df=dfs_per_id[did],
                 mt_list_for_runs_nested=mt_nested,
@@ -594,6 +666,9 @@ def main(
                 max_new_tokens=max_new_tokens,
                 runs=runs,
                 prompt_type=prompt_type,
+                difficulty_filter=difficulty_filter,
+                notes_list_per_item=notes_per_item,
+                use_notes_mask_per_item=mask_per_item,
             )
 
     wandb_config = {
@@ -607,12 +682,15 @@ def main(
         "metrics": all_valid_metrics,
         "lang_pairs": lang_pairs,
         "prompt_type": prompt_type,
+        "difficulty_filter": difficulty_filter,
+        "data_dir": data_dir,
     }
 
     log_results_to_wandb(
         datasets_metric_results=datasets_metric_results,
         config=wandb_config,
         datasets_metric_none_counts=datasets_metric_none_counts,
+        datasets_metrics_by_notes=datasets_metrics_by_notes,
     )
 
 

@@ -255,6 +255,9 @@ def save_gpe_results_to_json(
     temperature: float,
     top_p: float,
     max_new_tokens: int,
+    gpe_temperature: float,
+    gpe_top_p: float,
+    gpe_max_new_tokens: int,
     runs: int,
     prompt_type: str,
     difficulty_filter: int,
@@ -295,6 +298,9 @@ def save_gpe_results_to_json(
         "temperature": temperature,
         "top_p": top_p,
         "max_new_tokens": max_new_tokens,
+        "gpe_temperature": gpe_temperature,
+        "gpe_top_p": gpe_top_p,
+        "gpe_max_new_tokens": gpe_max_new_tokens,
         "runs": runs,
         "prompt_type": prompt_type,
         "difficulty_filter": difficulty_filter,
@@ -318,6 +324,9 @@ def main(
     temperature: float = 0.4,
     top_p: float = 0.7,
     max_new_tokens: int = 4096,
+    gpe_temperature: Optional[float] = None,
+    gpe_top_p: Optional[float] = None,
+    gpe_max_new_tokens: Optional[int] = None,
     metrics: list[str] = ["bleurt", "oss"],
     prompt_type: str = "codeblock-think",
     runs: int = 1,
@@ -395,6 +404,13 @@ def main(
         _clear_mem()
         gpe_model, gpe_tokenizer = None, None
 
+    if gpe_temperature is None:
+        gpe_temperature = temperature
+    if gpe_top_p is None:
+        gpe_top_p = top_p
+    if gpe_max_new_tokens is None:
+        gpe_max_new_tokens = max_new_tokens
+
     # --- Stage 2: GPE inference ---
     print(f"Running GPE inference: {runs * N} items ...")
     if gpe_model is None:
@@ -408,9 +424,9 @@ def main(
         src_langs=flat_src_langs,
         trg_langs=flat_trg_langs,
         notes_list=flat_notes_list,
-        temperature=temperature,
-        top_p=top_p,
-        max_new_tokens=max_new_tokens,
+        temperature=gpe_temperature,
+        top_p=gpe_top_p,
+        max_new_tokens=gpe_max_new_tokens,
         model=gpe_model,
         tokenizer=gpe_tokenizer,
     )
@@ -538,6 +554,9 @@ def main(
                 temperature=temperature,
                 top_p=top_p,
                 max_new_tokens=max_new_tokens,
+                gpe_temperature=gpe_temperature,
+                gpe_top_p=gpe_top_p,
+                gpe_max_new_tokens=gpe_max_new_tokens,
                 runs=runs,
                 prompt_type=prompt_type,
                 difficulty_filter=difficulty_filter,
@@ -552,6 +571,9 @@ def main(
         "temperature": temperature,
         "top_p": top_p,
         "max_new_tokens": max_new_tokens,
+        "gpe_temperature": gpe_temperature,
+        "gpe_top_p": gpe_top_p,
+        "gpe_max_new_tokens": gpe_max_new_tokens,
         "runs": runs,
         "sampling_n": sampling_n,
         "metrics": all_valid_metrics,

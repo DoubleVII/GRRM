@@ -1,59 +1,8 @@
 from typing import Union, List, Optional
-from utils.config import LANG_MAP, candidate_identifiers
+from utils.config import candidate_identifiers
 from utils.helpers import parse_score_text, _ranking_to_scores
 from inference.run_rm_SQM import load_model_tokenizer
-
-
-Output_example = {
-    "score": "Output the scores on the last line, for example: `A: 4, B: 9, C: 7, D: 9`.",
-    "ranking": "Output the rankings in descending order on the last line, for example: `B > A = D > C`.",
-    "ranking_score": "At the end section, first output the rankings in descending order, for example: `B > A = D > C`. Then, on the last line, output the scores, for example: `B: 9, A: 7, D: 7, C: 2`.",
-}
-
-
-
-
-Task_format = {
-    "score": "Finally, score the candidates with integer scores on a scale from 0 to 10.",
-    "ranking": "Finally, rank the candidates in order of quality from best to worst.",
-    "ranking_score": "Finally, rank and score the candidates with integer scores on a scale from 0 to 10."
-}
-
-
-prompt_template = """Given a source text in {} and multiple translation candidates in {}. Perform a step by step analysis and comparison of the translation quality for the candidates. {}
-
-Source text:
-```
-{}
-```
-
-{}"""
-
-candidate_prompt = """Translation {}:
-```
-{}
-```
-"""
-
-
-def get_task_prompt(prompt_format: str, add_example: bool = False):
-    if prompt_format not in Task_format:
-        raise ValueError(f"prompt_format must be one of {Task_format.keys()}")
-    task_prompt = Task_format[prompt_format]
-    if add_example:
-        task_prompt += f" {Output_example[prompt_format]}"
-    return task_prompt
-
-def get_prompt(source_lang, target_lang, source_text, mt_texts, prompt_format: str, add_example: bool = False):
-    if len(mt_texts) == 1:
-        raise ValueError(f"Only support multiple candidates.")
-    if len(mt_texts) > len(candidate_identifiers):
-        raise ValueError(f"Only support {len(candidate_identifiers)} candidates.")
-    
-    task_prompt = get_task_prompt(prompt_format, add_example)
-    
-    candidate_prompts = "".join([candidate_prompt.format(candidate_identifiers[i], mt_texts[i]) for i in range(len(mt_texts))])
-    return prompt_template.format(source_lang, target_lang, task_prompt, source_text, candidate_prompts)
+from inference.prompts import get_GQM_with_notes_prompt, Task_format
 
 
 def _validate_ranking(test_str: str, expected_num: int) -> bool:
@@ -130,9 +79,10 @@ def func_call(
     add_example: bool = False,
     model = None,
     tokenizer = None,
+    notes_list: Optional[list[str]] = None,
 ):
     from vllm import LLM, SamplingParams
-    
+
     assert prompt_type in Task_format.keys()
 
     if isinstance(src_langs, str):
@@ -142,7 +92,9 @@ def func_call(
 
     if len(src_list) != len(mt_list) or len(src_list) != len(src_langs) or len(src_list) != len(trg_langs):
         raise ValueError("src_list, mt_list, src_langs, and trg_langs must have the same length.")
-    
+    if notes_list is not None and len(notes_list) != len(src_list):
+        raise ValueError("notes_list must have the same length as src_list.")
+
     if model is None or tokenizer is None:
         gen_rm, tokenizer = load_model_tokenizer(model_path)
     else:
@@ -152,12 +104,9 @@ def func_call(
 
     # Build prompts
     prompt_list = []
-    for src_text, mt_texts, src_lang, trg_lang in zip(src_list, mt_list, src_langs, trg_langs):
-        if len(src_lang) == 2:
-            src_lang = LANG_MAP[src_lang]
-        if len(trg_lang) == 2:
-            trg_lang = LANG_MAP[trg_lang]
-        prompt = get_prompt(src_lang, trg_lang, src_text, mt_texts, prompt_type, add_example=add_example)
+    for i, (src_text, mt_texts, src_lang, trg_lang) in enumerate(zip(src_list, mt_list, src_langs, trg_langs)):
+        notes = notes_list[i] if notes_list else None
+        prompt = get_GQM_with_notes_prompt(src_lang, trg_lang, src_text, mt_texts, prompt_type, add_example=add_example, notes=notes)
         messages = [
             {"role": "user", "content": prompt},
         ]

@@ -421,6 +421,12 @@ def main(
                 all_valid_metrics.append(m)
 
 
+    # Print summary
+    for did in data_id_list:
+        print(f"\n=== {did} ===")
+        for m, v in datasets_metric_results[did].items():
+            print(f"  {m}: {v:.4f}")
+
     wandb_config = {
         "dataset_names": data_id_list,
         "model_path": model_path,

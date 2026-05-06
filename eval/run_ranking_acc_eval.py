@@ -40,6 +40,32 @@ def log_results_to_wandb(
     wandb.log({f"ranking_acc_results": table})
 
 
+def run_comet_poly_inference(
+    df: pd.DataFrame,
+    model_path: str,
+    runs: int = 1,
+):
+    import eval.comet_poly_ranking_cli as comet_poly_ranking_cli
+
+    src_list = df["src_text"].tolist()
+    mt_list = df["mt_texts"].tolist()
+
+    score_for_runs = []
+    for _ in range(runs):
+        score_list = comet_poly_ranking_cli.func_call(
+            model_path,
+            src_list,
+            mt_list,
+        )
+        if len(score_list) != len(df):
+            raise ValueError(
+                f"score_list must have the same length as src_list, but got {len(score_list)} and {len(df)}"
+            )
+
+        score_for_runs.append(score_list)
+
+    return score_for_runs
+
 def run_rm_SQM_inference(
     df: pd.DataFrame,
     model_path: str,
@@ -295,9 +321,9 @@ def main(
             f"prompt_type must be one of ['score', 'ranking', 'ranking_score']"
         )
     
-    if model_type not in ["grrm", "sqmrm", "drm"]:
+    if model_type not in ["grrm", "sqmrm", "drm", "comet_poly"]:
         raise ValueError(
-            f"model_type must be one of ['grrm', 'sqmrm', 'drm']"
+            f"model_type must be one of ['grrm', 'sqmrm', 'drm', 'comet_poly']"
         )
 
     if isinstance(data_id, str):
@@ -377,6 +403,12 @@ def main(
                 runs,
                 model=model,
                 tokenizer=tokenizer,
+            )
+        elif model_type == "comet_poly":
+            score_for_runs = run_comet_poly_inference(
+                df,
+                model_path,
+                runs=runs,
             )
 
         metric_results = run_eval(df, score_for_runs)

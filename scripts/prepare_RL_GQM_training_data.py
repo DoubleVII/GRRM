@@ -4,13 +4,63 @@ import itertools
 import random
 from typing import List, Union
 from utils.config import LANG_MAP
-from inference.run_rm_GQM import get_prompt
+from inference.prompts import get_GQM_with_notes_prompt as get_prompt
 from utils.helpers import _score_to_rank
 from utils.config import candidate_identifiers
 import json
 import math
 
 random.seed(114514)
+
+
+def _build_score_dict(scores: List[int]) -> dict:
+    return {candidate_identifiers[i]: scores[i] for i in range(len(scores))}
+
+
+def _build_ground_truth(scores: List[int], prompt_type: str) -> Union[str, dict]:
+    score_dict = _build_score_dict(scores)
+    if prompt_type == "ranking":
+        return _score_to_rank(score_dict)
+    if prompt_type == "ranking_score":
+        return json.dumps(score_dict)
+    raise ValueError(f"Invalid prompt_type {prompt_type}")
+
+
+def _build_data_item(
+    src_text: str,
+    mt_texts: List[str],
+    src_lang: str,
+    trg_lang: str,
+    analysis: str,
+    scores: List[int],
+    prompt_type: str,
+    shuffle_indices: List[int],
+    include_mt_texts: bool = False,
+) -> dict:
+    extra_info = {
+        "src_lang": src_lang,
+        "trg_lang": trg_lang,
+        "analysis": analysis,
+        "shuffle_indices": shuffle_indices,
+    }
+    if include_mt_texts:
+        extra_info["mt_texts"] = mt_texts
+
+    return {
+        "data_source": f"TowerBlocks-MT-Ranking.{prompt_type}",
+        "prompt": [
+            {
+                "role": "user",
+                "content": get_prompt(
+                    src_lang, trg_lang, src_text, mt_texts, prompt_type
+                ),
+            }
+        ],
+        "ability": "ranking",
+        "reward_model": {"ground_truth": _build_ground_truth(scores, prompt_type)},
+        "extra_info": extra_info,
+    }
+
 
 def construct_data_item(
     src_text: str,
@@ -28,29 +78,19 @@ def construct_data_item(
     """
     data_items = []
 
-    # --- Original item ---
-    score_dict = {candidate_identifiers[i]: scores[i] for i in range(len(scores))}
-    prompt = get_prompt(src_lang, trg_lang, src_text, mt_texts, prompt_type)
-    if prompt_type == "ranking":
-        ground_truth = _score_to_rank(score_dict)
-    elif prompt_type == "ranking_score":
-        ground_truth = json.dumps(score_dict)
-    else:
-        raise ValueError(f"Invalid prompt_type {prompt_type}")
-    base_item = {
-        "data_source": f"TowerBlocks-MT-Ranking.{prompt_type}",
-        "prompt": [{"role": "user", "content": prompt}],
-        "ability": "ranking",
-        "reward_model": {"ground_truth": ground_truth},
-        "extra_info": {
-            "src_lang": src_lang,
-            "trg_lang": trg_lang,
-            "analysis": analysis,
-            "mt_texts": mt_texts,
-            "shuffle_indices": list(range(len(mt_texts))),
-        },
-    }
-    data_items.append(base_item)
+    data_items.append(
+        _build_data_item(
+            src_text,
+            mt_texts,
+            src_lang,
+            trg_lang,
+            analysis,
+            scores,
+            prompt_type,
+            shuffle_indices=list(range(len(mt_texts))),
+            include_mt_texts=True,
+        )
+    )
 
     # --- Shuffle augmentation ---
     if shuffle_augment > 0 and len(mt_texts) > 1:
@@ -67,30 +107,18 @@ def construct_data_item(
 
             shuffled_mt_texts = [mt_texts[i] for i in indices]
             shuffled_scores = [scores[i] for i in indices]
-            shuffled_score_dict = {candidate_identifiers[i]: shuffled_scores[i] for i in range(len(shuffled_scores))}
-
-            shuffled_prompt = get_prompt(
-                src_lang, trg_lang, src_text, shuffled_mt_texts, prompt_type
+            data_items.append(
+                _build_data_item(
+                    src_text,
+                    shuffled_mt_texts,
+                    src_lang,
+                    trg_lang,
+                    analysis,
+                    shuffled_scores,
+                    prompt_type,
+                    shuffle_indices=indices,
+                )
             )
-            if prompt_type == "ranking":
-                shuffled_ground_truth = _score_to_rank(shuffled_score_dict)
-            elif prompt_type == "ranking_score":
-                shuffled_ground_truth = json.dumps(shuffled_score_dict)
-            else:
-                raise ValueError(f"Invalid prompt_type {prompt_type}")
-
-            data_items.append({
-                "data_source": f"TowerBlocks-MT-Ranking.{prompt_type}",
-                "prompt": [{"role": "user", "content": shuffled_prompt}],
-                "ability": "ranking",
-                "reward_model": {"ground_truth": shuffled_ground_truth},
-                "extra_info": {
-                    "src_lang": src_lang,
-                    "trg_lang": trg_lang,
-                    "analysis": analysis,
-                    "shuffle_indices": indices,
-                },
-            })
             num_generated += 1
 
             # Stop early if we’ve exhausted all unique permutations
@@ -98,6 +126,7 @@ def construct_data_item(
                 break
 
     return data_items
+
 
 def main(
     data_path: str,

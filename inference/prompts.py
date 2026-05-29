@@ -22,7 +22,7 @@ Source text:
 {source_text}
 ```
 
-{candidate_prompts}{notes_prompt}"""
+{candidate_prompts}{reference_prompt}{notes_prompt}"""
 
 
 notes_prompt_template = """
@@ -32,6 +32,17 @@ You may refer to the following notes, if helpful, when evaluating the translatio
 Notes:
 ```
 {notes}
+```
+"""
+
+
+reference_prompt_template = """
+
+You may refer to the following reference, if helpful, when evaluating the translations.
+
+{} reference:
+```
+{}
 ```
 """
 
@@ -61,7 +72,19 @@ def build_notes_prompt(notes: str = None) -> str:
     return notes_prompt_template.format(notes=notes)
 
 
-def get_GQM_with_notes_prompt(
+def build_reference_prompt(ref_text: str = None, ref_lang: str = None) -> str:
+    if ref_text is None or ref_lang is None:
+        return ""
+    ref_text = ref_text.strip()
+    ref_lang = ref_lang.strip()
+    if not ref_text or not ref_lang:
+        return ""
+    if len(ref_lang) == 2 and ref_lang in LANG_MAP:
+        ref_lang = LANG_MAP[ref_lang]
+    return reference_prompt_template.format(ref_lang, ref_text)
+
+
+def get_GQM_prompt(
     source_lang,
     target_lang,
     source_text,
@@ -69,10 +92,12 @@ def get_GQM_with_notes_prompt(
     prompt_format: str,
     add_example: bool = False,
     notes: str = None,
+    ref_text: str = None,
+    ref_lang: str = None,
 ):
-    if len(source_lang) == 2:
+    if len(source_lang) == 2 and source_lang in LANG_MAP:
         source_lang = LANG_MAP[source_lang]
-    if len(target_lang) == 2:
+    if len(target_lang) == 2 and target_lang in LANG_MAP:
         target_lang = LANG_MAP[target_lang]
     if len(mt_texts) == 1:
         raise ValueError("Only support multiple candidates.")
@@ -87,6 +112,7 @@ def get_GQM_with_notes_prompt(
     )
 
     notes_prompt = build_notes_prompt(notes)
+    reference_prompt = build_reference_prompt(ref_text, ref_lang)
 
     return GQM_prompt_template.format(
         source_lang=source_lang,
@@ -94,8 +120,12 @@ def get_GQM_with_notes_prompt(
         task_prompt=task_prompt,
         source_text=source_text,
         candidate_prompts=candidate_prompts,
+        reference_prompt=reference_prompt,
         notes_prompt=notes_prompt,
     )
+
+
+get_GQM_with_notes_prompt = get_GQM_prompt
 
 
 
@@ -525,7 +555,7 @@ def get_prep_notes_prompt(source_lang, target_lang, source_text):
 
 
 if __name__ == "__main__":
-    # print(get_GQM_with_notes_prompt("en", "zh", "Hello, world!", ["你好，世界！", "您好，砸瓦鲁多"], "ranking_score", add_example=False, notes="A helpful note."))
+    # print(get_GQM_prompt("en", "zh", "Hello, world!", ["你好，世界！", "您好，砸瓦鲁多"], "ranking_score", add_example=False, notes="A helpful note."))
     
     print(get_group_post_edit_prompt("en", "zh", "Hello, world!", ["你好，世界！", "您好，砸瓦鲁多"], notes="A helpful note."))
 

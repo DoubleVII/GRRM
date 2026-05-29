@@ -2,7 +2,7 @@ from typing import Union, List, Optional
 from utils.config import candidate_identifiers
 from utils.helpers import parse_score_text, _ranking_to_scores
 from inference.run_rm_SQM import load_model_tokenizer
-from inference.prompts import get_GQM_with_notes_prompt, Task_format
+from inference.prompts import get_GQM_prompt, Task_format
 
 
 def _validate_ranking(test_str: str, expected_num: int) -> bool:
@@ -106,7 +106,7 @@ def func_call(
     prompt_list = []
     for i, (src_text, mt_texts, src_lang, trg_lang) in enumerate(zip(src_list, mt_list, src_langs, trg_langs)):
         notes = notes_list[i] if notes_list else None
-        prompt = get_GQM_with_notes_prompt(src_lang, trg_lang, src_text, mt_texts, prompt_type, add_example=add_example, notes=notes)
+        prompt = get_GQM_prompt(src_lang, trg_lang, src_text, mt_texts, prompt_type, add_example=add_example, notes=notes)
         messages = [
             {"role": "user", "content": prompt},
         ]

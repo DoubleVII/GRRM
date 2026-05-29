@@ -10,7 +10,7 @@ from openai_harmony import (
 )
 from inference.run_oss_SQM import init_oss_model, load_encoding
 from inference.run_oss_GQM import extract_response
-from inference.prompts import get_GQM_with_notes_prompt, get_teacher_GQM_with_notes_prompt
+from inference.prompts import get_GQM_prompt, get_teacher_GQM_with_notes_prompt
 
 
 def post_process_analysis(text: str) -> Optional[str]:

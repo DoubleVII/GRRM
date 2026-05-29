@@ -4,7 +4,7 @@ import itertools
 import random
 from typing import List, Union
 from utils.config import LANG_MAP
-from inference.prompts import get_GQM_with_notes_prompt as get_prompt
+from inference.prompts import get_GQM_prompt as get_prompt
 from utils.helpers import _score_to_rank
 from utils.config import candidate_identifiers
 import json
@@ -26,20 +26,36 @@ def _build_ground_truth(scores: List[int], prompt_type: str) -> Union[str, dict]
     raise ValueError(f"Invalid prompt_type {prompt_type}")
 
 
+def _sanitize_ref_text(ref_text: str, mt_texts: List[str]) -> Union[str, None]:
+    if ref_text is None:
+        return None
+    if ref_text in mt_texts:
+        return None
+    return ref_text
+
+
 def _build_data_item(
     src_text: str,
     mt_texts: List[str],
     src_lang: str,
     trg_lang: str,
+    ref_lang: str,
+    ref_text: str,
     analysis: str,
     scores: List[int],
     prompt_type: str,
     shuffle_indices: List[int],
     include_mt_texts: bool = False,
+    include_reference_prompt: bool = False,
 ) -> dict:
+    safe_ref_text = _sanitize_ref_text(ref_text, mt_texts)
+    use_reference_prompt = include_reference_prompt and safe_ref_text is not None
     extra_info = {
         "src_lang": src_lang,
         "trg_lang": trg_lang,
+        "ref_lang": ref_lang,
+        "ref_text": ref_text,
+        "reference_prompt_used": use_reference_prompt,
         "analysis": analysis,
         "shuffle_indices": shuffle_indices,
     }
@@ -52,7 +68,13 @@ def _build_data_item(
             {
                 "role": "user",
                 "content": get_prompt(
-                    src_lang, trg_lang, src_text, mt_texts, prompt_type
+                    src_lang,
+                    trg_lang,
+                    src_text,
+                    mt_texts,
+                    prompt_type,
+                    ref_text=safe_ref_text if use_reference_prompt else None,
+                    ref_lang=ref_lang if use_reference_prompt else None,
                 ),
             }
         ],
@@ -67,10 +89,13 @@ def construct_data_item(
     mt_texts: List[str],
     src_lang: str,
     trg_lang: str,
+    ref_lang: str,
+    ref_text: str,
     analysis: str,
     scores: List[int],
     prompt_type: str = "ranking_score",
     shuffle_augment: int = 0,
+    include_reference_prompt: bool = False,
 ) -> list:
     """
     Construct ranking data items, optionally with shuffle-based augmentation.
@@ -84,11 +109,14 @@ def construct_data_item(
             mt_texts,
             src_lang,
             trg_lang,
+            ref_lang,
+            ref_text,
             analysis,
             scores,
             prompt_type,
             shuffle_indices=list(range(len(mt_texts))),
             include_mt_texts=True,
+            include_reference_prompt=include_reference_prompt,
         )
     )
 
@@ -113,10 +141,13 @@ def construct_data_item(
                     shuffled_mt_texts,
                     src_lang,
                     trg_lang,
+                    ref_lang,
+                    ref_text,
                     analysis,
                     shuffled_scores,
                     prompt_type,
                     shuffle_indices=indices,
+                    include_reference_prompt=include_reference_prompt,
                 )
             )
             num_generated += 1
@@ -137,6 +168,7 @@ def main(
     prompt_type: str = "ranking_score",
     subgroup_augment: int = 0,
     shuffle_augment: int = 0,
+    include_reference_prompt: bool = False,
 ):
     assert prompt_type in ["ranking", "ranking_score"] # TODO: support score
     df = pd.read_parquet(data_path)
@@ -147,6 +179,7 @@ def main(
         mt_texts = row[mt_key]
         src_lang = row["src_lang"]
         trg_lang = row["trg_lang"]
+        ref_text = row["trg_text"]
         analysis = row[analysis_key]
         scores = [int(s) for s in row[score_key]]
 
@@ -156,6 +189,7 @@ def main(
             src_lang = LANG_MAP[src_lang]
         if len(trg_lang) == 2:
             trg_lang = LANG_MAP[trg_lang]
+        ref_lang = trg_lang
 
         # --- Original full-sample data ---
         data_items.extend(
@@ -164,10 +198,13 @@ def main(
                 mt_texts,
                 src_lang,
                 trg_lang,
+                ref_lang,
+                ref_text,
                 analysis,
                 scores,
                 prompt_type,
                 shuffle_augment,
+                include_reference_prompt,
             )
         )
 
@@ -193,10 +230,13 @@ def main(
                         subset_mt_texts,
                         src_lang,
                         trg_lang,
+                        ref_lang,
+                        ref_text,
                         analysis,
                         subset_scores,
                         prompt_type,
                         shuffle_augment,
+                        include_reference_prompt,
                     )
                 )
     # Shuffle and save

@@ -14,7 +14,7 @@ PROMPT_TEMPLATE = "codeblock-think"
 random.seed(RANDOM_STATE)
 
 
-def build_data_item(row, src_lang, trg_lang, testset=False):
+def build_data_item(row, src_lang, trg_lang, testset=False, include_reference_info=True):
     src_text = row["src_text"]
     ref_text = row["trg_text"]
     ref_lang = row["trg_lang"]
@@ -29,10 +29,11 @@ def build_data_item(row, src_lang, trg_lang, testset=False):
             "src_lang": src_lang,
             "trg_lang": trg_lang,
             "src_text": src_text,
-            "ref_lang": ref_lang,
-            "ref_text": ref_text,
         }
     }
+    if include_reference_info:
+        data_item["extra_info"]["ref_lang"] = ref_lang
+        data_item["extra_info"]["ref_text"] = ref_text
 
     if testset:
         data_item["reward_model"] = {"style": "rule", "ground_truth": ref_text}
@@ -100,19 +101,19 @@ def print_data_stats(df, name, top_k_pairs=20):
         print(f"[{name}] rows where trg_lang != ref_lang: {ref_mismatch_count}")
 
 
-def run_prepare(df, testset=False):
+def run_prepare(df, testset=False, include_reference_info=True):
     output = []
 
     for _, row in df.iterrows():
         src_lang = row["src_lang"]
         trg_lang = row["trg_lang"]
-        output.append(build_data_item(row, src_lang, trg_lang, testset))
+        output.append(build_data_item(row, src_lang, trg_lang, testset, include_reference_info))
 
     out_df = pd.DataFrame(output)
     return maybe_shuffle(out_df, testset)
 
 
-def run_prepare_towerx(df, testset=False, trg_lang_num=1):
+def run_prepare_towerx(df, testset=False, trg_lang_num=1, include_reference_info=True):
     """
     Prepare cross-lingual augmented x2x data.
     """
@@ -128,15 +129,15 @@ def run_prepare_towerx(df, testset=False, trg_lang_num=1):
         trg_langs = random.sample(langs_candidate, sample_size)
 
         for trg_lang in trg_langs:
-            output.append(build_data_item(row, src_lang, trg_lang, testset))
+            output.append(build_data_item(row, src_lang, trg_lang, testset, include_reference_info))
 
     out_df = pd.DataFrame(output)
     return maybe_shuffle(out_df, testset)
 
 
-def construct_tower(data_path, output_path, testset=False):
+def construct_tower(data_path, output_path, testset=False, include_reference_info=True):
     df = pd.read_parquet(data_path)
-    df = run_prepare(df, testset)
+    df = run_prepare(df, testset, include_reference_info)
     print_data_stats(df, "tower")
     df.to_parquet(output_path, index=False)
 
@@ -147,6 +148,7 @@ def construct_towerx(
     testset=False,
     testset_sample_size=None,
     trg_lang_num=1,
+    include_reference_info=False,
 ):
     """
     Build TowerX data.
@@ -155,12 +157,17 @@ def construct_towerx(
     Test split: sampled from x2x augmented data only.
     """
     df = pd.read_parquet(data_path)
-    x2x_df = run_prepare_towerx(df, testset, trg_lang_num=trg_lang_num)
+    x2x_df = run_prepare_towerx(
+        df,
+        testset,
+        trg_lang_num=trg_lang_num,
+        include_reference_info=include_reference_info,
+    )
 
     if testset:
         output_df = maybe_sample(x2x_df, testset_sample_size)
     else:
-        en_df = run_prepare(df, testset)
+        en_df = run_prepare(df, testset, include_reference_info)
         output_df = pd.concat([en_df, x2x_df], axis=0)
         output_df = output_df.sample(frac=1, random_state=RANDOM_STATE)
         print(f"[towerx] original rows: {len(en_df)}")

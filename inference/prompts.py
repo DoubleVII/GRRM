@@ -196,32 +196,28 @@ Your task is to produce a final improved translation in the target language by:
 - reviewing the available translation candidates,
 - and selecting or carefully combining the best parts of the candidates.
 
-You will receive:
-- source language
-- target language
-- source text
-- 1 to 4 translation candidates
 
 Your job:
 1. Read the source text carefully.
-2. Compare the translation candidates against the source text.
-3. Identify which candidate is the best base, or whether a careful combination of candidates is needed.
-4. Perform minimal, targeted post-editing to produce the best final translation.
-5. Prioritize correctness, faithfulness, fluency, consistency, and naturalness in the target language.
-6. Do not produce multiple alternative translations.
+2. Identify which candidate is the best base, or whether a careful combination of candidates is needed.
+3. Perform minimal, targeted post-editing to produce the best final translation.
+4. Provide a step-by-step analysis in the output before the final translation.
 
-Be especially careful about:
-- preserving meaning from the source text
-- resolving omissions, mistranslations, and overtranslations
-- choosing the most accurate wording among candidates
-- maintaining grammatical correctness and fluency
-- improving your translation if necessary
 
 Output format requirements:
-1. Output the final post-edited translation as a single code block.
-2. Inside that code block, output only the final translation and nothing else.
+1. First output your step-by-step analysis in Markdown.
+2. After that, output the final post-edited translation as a single Markdown code block. Inside that code block, output only the final translation and nothing else.
 
-Now perform the task on the following input.
+Output format:
+# Step-by-step Analysis
+[analysis/breakdown]
+
+# Final post-edited translation
+```
+[your translation]
+```
+
+---
 
 Source language: {source_lang}
 Target language: {target_lang}
@@ -284,12 +280,7 @@ Your task is to produce a final improved translation in the target language by:
 
 Your priority is to respect the notes and make the smallest necessary edits.
 
-Be especially careful about:
-- preserving meaning from the source text
-- preserving tone/register/style when mentioned in the notes
-- not introducing unsupported improvements
-
-Now perform the task on the following input.
+---
 
 Source language: {source_lang}
 Target language: {target_lang}
@@ -308,6 +299,8 @@ Notes:
 """
 
 
+
+
 group_post_edit_prompt_templates = """You are a translation post-editing agent.
 
 Your task is to produce a final improved translation in the target language by:
@@ -315,15 +308,7 @@ Your task is to produce a final improved translation in the target language by:
 - reviewing the available translation candidates,
 - and selecting or carefully combining the best parts of the candidates.
 
-
-Be especially careful about:
-- preserving meaning from the source text
-- resolving omissions, mistranslations, and overtranslations
-- choosing the most accurate wording among candidates
-- maintaining grammatical correctness and fluency
-- improving your translation if necessary
-
-Now perform the task on the following input.
+---
 
 Source language: {source_lang}
 Target language: {target_lang}
@@ -335,7 +320,6 @@ Source text:
 
 {candidate_prompts}
 """
-
 
 def get_group_post_edit_prompt(
     source_lang,

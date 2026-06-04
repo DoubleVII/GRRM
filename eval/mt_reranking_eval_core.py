@@ -9,6 +9,7 @@ import wandb
 from eval.run_mt_eval import (
     _clear_mem,
     _load_datasets,
+    _release_vllm_model,
     _sanitize_filename_component,
     _split_scores_by_data_id,
     run_bleurt_eval,
@@ -269,8 +270,8 @@ def run_reranking_eval_core(
     if ranking_model_path == model_path:
         ranking_model, ranking_tokenizer = model, tokenizer
     else:
+        _release_vllm_model(model)
         del model, tokenizer
-        _clear_mem()
         ranking_model, ranking_tokenizer = None, None
 
     if ranking_temperature is None:
@@ -319,6 +320,7 @@ def run_reranking_eval_core(
             selected_indices_flat.append(0)
 
     try:
+        _release_vllm_model(ranking_model)
         del ranking_model, ranking_tokenizer
         if "model" in dir() and model is not None:
             del model, tokenizer
@@ -375,8 +377,8 @@ def run_reranking_eval_core(
         add_metric("oss", oss_scores_flat)
 
         try:
+            _release_vllm_model(oss_model)
             del oss_model
-            _clear_mem()
         except Exception:
             pass
 

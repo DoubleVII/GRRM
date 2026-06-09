@@ -1,5 +1,5 @@
 from utils.config import LANG_MAP, candidate_identifiers
-
+from typing import Optional
 
 Output_example = {
     "score": "Output the scores on the last line, for example: `A: 4, B: 9, C: 7, D: 9`.",
@@ -625,3 +625,40 @@ def get_teacher_GQM_with_notes_prompt(
         candidate_prompts=candidate_prompts,
         notes=notes,
     )
+
+
+
+
+def get_mt_privileged_prompt(
+    prompt_type, src_lang, trg_lang, src_text, ref_text: str = None, ref_lang: str = None, notes: Optional[str] = None
+):
+    if notes is not None and prompt_type != "codeblock-think":
+        raise ValueError("only codeblock-think prompt can use notes input")
+    
+    if len(src_lang) == 2:
+        src_lang = LANG_MAP[src_lang]
+    if len(trg_lang) == 2:
+        trg_lang = LANG_MAP[trg_lang]
+    if ref_lang is not None and len(ref_lang) == 2:
+        ref_lang = LANG_MAP[ref_lang]
+    
+    if prompt_type == "codeblock-think":
+        reference_prompt = ""
+        if ref_text is not None and ref_lang is not None:
+            reference_prompt = f"""
+
+Here is a reference translation in {ref_lang}:
+```
+{ref_text}
+```
+Try to provide your own analysis and final translation based on the reference.
+"""
+        return f"""Translate the following text from {src_lang} into {trg_lang}. Perform a step by step analysis and output the final translation in a code block.
+
+Source text:
+```
+{src_text}
+```{build_notes_prompt(notes)}
+{reference_prompt}"""
+    else:
+        raise NotImplementedError

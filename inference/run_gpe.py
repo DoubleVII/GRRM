@@ -69,4 +69,7 @@ def func_call(
     if failed_indices:
         print(f"Warning: {len(failed_indices)} items still failed after {retry} retries.")
 
+    # Placeholder for unresolved None outputs after retries
+    post_edit_list = [text if text is not None else "Translation Failed." for text in post_edit_list]
+
     return {"post_edit_mt": post_edit_list, "responses": output_text_list}

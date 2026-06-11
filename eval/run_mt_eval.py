@@ -458,8 +458,51 @@ def _clear_mem():
         import torch
         if hasattr(torch, "cuda") and torch.cuda.is_available():
             torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
     except Exception:
         pass
+
+
+def _release_vllm_model(model, sleep: bool = True):
+    """Best-effort teardown for vLLM engines before loading another model."""
+    if model is None:
+        _clear_mem()
+        return
+
+    if sleep and hasattr(model, "sleep"):
+        try:
+            model.sleep(level=2)
+        except Exception:
+            pass
+
+    try:
+        llm_engine = getattr(model, "llm_engine", None)
+        engine_core = getattr(llm_engine, "engine_core", None)
+        model_executor = getattr(llm_engine, "model_executor", None)
+        if engine_core is not None and hasattr(engine_core, "shutdown"):
+            engine_core.shutdown()
+        elif llm_engine is not None and hasattr(llm_engine, "shutdown"):
+            llm_engine.shutdown()
+        elif model_executor is not None and hasattr(model_executor, "shutdown"):
+            model_executor.shutdown()
+        elif llm_engine is not None and hasattr(llm_engine, "close"):
+            llm_engine.close()
+    except Exception:
+        pass
+
+    try:
+        from vllm.distributed import (
+            destroy_distributed_environment,
+            destroy_model_parallel,
+        )
+
+        destroy_model_parallel()
+        destroy_distributed_environment()
+    except Exception:
+        pass
+
+    _clear_mem()
+
 
 def main(
     data_id: tuple[str],
@@ -551,9 +594,9 @@ def main(
 
     # Release MT model to free GPU memory
     try:
+        _release_vllm_model(model)
         del model
         del tokenizer
-        _clear_mem()
     except Exception:
         pass
 
@@ -603,8 +646,8 @@ def main(
             all_valid_metrics.append("oss")
 
         try:
+            _release_vllm_model(oss_model)
             del oss_model
-            _clear_mem()
         except Exception:
             pass
 

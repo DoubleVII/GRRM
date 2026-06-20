@@ -662,3 +662,8 @@ Source text:
 {reference_prompt}"""
     else:
         raise NotImplementedError
+
+
+
+def get_GQM_GPE_prompt():
+    return "Using the source text, candidate translations, and evaluation above, provide the final improved translation in the target language. Include a concise step-by-step analysis, then output only the final translation in a single Markdown code block."

@@ -27,7 +27,7 @@ Source text:
 
 notes_prompt_template = """
 
-You may refer to the following notes, if helpful, when evaluating the translations.
+You may refer to the following notes if necessary.
 
 Notes:
 ```
@@ -38,7 +38,7 @@ Notes:
 
 reference_prompt_template = """
 
-You may refer to the following reference, if helpful, when evaluating the translations.
+You may refer to the following reference if necessary.
 
 {} reference:
 ```

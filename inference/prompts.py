@@ -515,6 +515,17 @@ Bad output examples:
 Your goal is to maximize usefulness while minimizing unnecessary guidance.
 """
 
+
+prep_notes_simple_task_prompt = """You are a translation-prep agent. Your task is not to fully translate the source text, but to analyze it and produce only a concise list of translation-relevant notes that may help a downstream translation agent.
+
+Your job:
+1. Read the source text and assess whether it contains any translation difficulties, special handling requirements, or notable stylistic/semantic risks.
+2. First, provide a brief step-by-step analysis of whether any special translation guidance is needed and why.
+3. In that analysis, assign a translation difficulty score from 0 to 10.
+4. Then summarize the useful translation notes into a short natural-language checklist for a downstream translator.
+5. You may include recommended translations for specific words or short phrases when helpful, but do not produce a full translation of the text.
+"""
+
 prep_notes_prompt_template = """
 {}
 
@@ -529,13 +540,13 @@ Source text:
 """
 
 
-def get_prep_notes_prompt(source_lang, target_lang, source_text):
+def get_prep_notes_prompt(source_lang, target_lang, source_text, use_simple_prompt=False):
     if len(source_lang) == 2:
         source_lang = LANG_MAP[source_lang]
     if len(target_lang) == 2:
         target_lang = LANG_MAP[target_lang]
 
-    return prep_notes_prompt_template.format(prep_notes_task_prompt, source_lang, target_lang, source_text)
+    return prep_notes_prompt_template.format(prep_notes_task_prompt if not use_simple_prompt else prep_notes_simple_task_prompt, source_lang, target_lang, source_text)
 
 
 if __name__ == "__main__":

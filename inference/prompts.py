@@ -271,6 +271,97 @@ def get_oss_group_post_edit_prompt(
 
 
 
+
+oss_GQM_post_edit_completion_prompt_template = """You are completing an existing translation-quality response with a post-editing decision.
+
+The source text, translation candidates, and the existing GQM response are provided below. The existing GQM response already contains the detailed candidate evaluation and scores. Treat it as the completed first part of the response: do not repeat, rewrite, summarize, or rescore it.
+
+Continue the response by selecting the strongest candidate as the base and making only the edits needed to produce the best final translation. The source text remains authoritative if any candidate or evaluation detail is inconsistent with it.
+
+Language and style requirements:
+- Write the post-edit analysis in English, regardless of the source and target languages.
+- When referring to specific words or passages from the source text or translation candidates, preserve those quoted passages in their original language; the surrounding analysis must remain in English.
+- The final translation is the only section that must be in {target_lang}.
+- Match the terminology, tone, and level of detail of the existing GQM analysis.
+- Keep the post-edit analysis concise but substantive: use 1 to 3 specific points that identify the chosen base or combination and the necessary corrections.
+- Do not omit the post-edit analysis.
+- Do not provide alternative final translations.
+
+Output exactly these two sections and nothing before or after them:
+
+# Post-edit Analysis
+[brief analysis of the selection and edits]
+
+# Final post-edited translation
+```
+[one final translation in {target_lang}]
+```
+
+---
+
+Source language: {source_lang}
+Target language: {target_lang}
+
+Source text:
+```
+{source_text}
+```
+
+{candidate_prompts}
+<existing_gqm_response>
+{gqm_response}
+</existing_gqm_response>
+"""
+
+
+def format_GQM_scores(scores, candidate_count: int) -> str:
+    if len(scores) != candidate_count:
+        raise ValueError(
+            f"Expected {candidate_count} GQM scores, but got {len(scores)}."
+        )
+    identifiers = candidate_identifiers[:candidate_count]
+    return ", ".join(
+        f"{identifier}: {int(score)}"
+        for identifier, score in zip(identifiers, scores)
+    )
+
+
+def get_oss_GQM_post_edit_completion_prompt(
+    source_lang,
+    target_lang,
+    source_text,
+    mt_texts,
+    gqm_analysis,
+    gqm_scores,
+):
+    if len(source_lang) == 2:
+        source_lang = LANG_MAP[source_lang]
+    if len(target_lang) == 2:
+        target_lang = LANG_MAP[target_lang]
+    if len(mt_texts) == 1:
+        raise ValueError("Only support multiple candidates.")
+    if len(mt_texts) > len(candidate_identifiers):
+        raise ValueError(f"Only support {len(candidate_identifiers)} candidates.")
+    if not isinstance(gqm_analysis, str) or not gqm_analysis.strip():
+        raise ValueError("GQM analysis must be a non-empty string.")
+
+    candidate_prompts = "".join(
+        candidate_prompt.format(candidate_identifiers[i], mt_text)
+        for i, mt_text in enumerate(mt_texts)
+    )
+    score_line = format_GQM_scores(gqm_scores, len(mt_texts))
+    gqm_response = f"{gqm_analysis.strip()}\n\n### Scores:\n\n{score_line}"
+
+    return oss_GQM_post_edit_completion_prompt_template.format(
+        source_lang=source_lang,
+        target_lang=target_lang,
+        source_text=source_text,
+        candidate_prompts=candidate_prompts,
+        gqm_response=gqm_response,
+    )
+
+
+
 group_post_edit_with_notes_prompt_templates = """You are a translation post-editing agent.
 
 Your task is to produce a final improved translation in the target language by:

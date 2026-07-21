@@ -276,21 +276,22 @@ oss_GQM_post_edit_completion_prompt_template = """You are completing an existing
 
 The source text, translation candidates, and the existing GQM response are provided below. The existing GQM response already contains the detailed candidate evaluation and scores. Treat it as the completed first part of the response: do not repeat, rewrite, summarize, or rescore it.
 
-Continue the response by selecting the strongest candidate as the base and making only the edits needed to produce the best final translation. The source text remains authoritative if any candidate or evaluation detail is inconsistent with it.
+Use the existing GQM analysis to decide the best post-editing strategy for the specific input. You may preserve the strongest candidate, combine the best-supported parts of multiple candidates, or rewrite a flawed passage when necessary. Produce the most accurate and natural final translation supported by the source text.
+
+Prefer minimal edits when a candidate is already accurate, but do not preserve a candidate's wording when doing so would reduce accuracy, completeness, or fluency. Do not introduce information unsupported by the source text. The source text remains authoritative if any candidate or evaluation detail is inconsistent with it.
 
 Language and style requirements:
 - Write the post-edit analysis in English, regardless of the source and target languages.
 - When referring to specific words or passages from the source text or translation candidates, preserve those quoted passages in their original language; the surrounding analysis must remain in English.
 - The final translation is the only section that must be in {target_lang}.
 - Match the terminology, tone, and level of detail of the existing GQM analysis.
-- Keep the post-edit analysis concise but substantive: use 1 to 3 specific points that identify the chosen base or combination and the necessary corrections.
 - Do not omit the post-edit analysis.
 - Do not provide alternative final translations.
 
 Output exactly these two sections and nothing before or after them:
 
 # Post-edit Analysis
-[brief analysis of the selection and edits]
+[detailed analysis of the selection and edits]
 
 # Final post-edited translation
 ```

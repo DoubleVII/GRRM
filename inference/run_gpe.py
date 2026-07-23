@@ -18,7 +18,31 @@ def func_call(
     retry: int = 6,
     model=None,
     tokenizer=None,
+    task_type: str = "gpe",
+    prompt_type: str = "ranking_score",
 ):
+    if task_type not in {"gpe", "gqmpe"}:
+        raise ValueError("task_type must be one of {'gpe', 'gqmpe'}")
+    if task_type == "gqmpe":
+        if notes_list is not None and any(note is not None for note in notes_list):
+            raise ValueError("GQMPE does not currently support notes.")
+        from inference.run_gqmpe import func_call as gqmpe_func_call
+
+        return gqmpe_func_call(
+            model_path=model_path,
+            src_list=src_list,
+            mt_list=mt_list,
+            src_langs=src_langs,
+            trg_langs=trg_langs,
+            temperature=temperature,
+            top_p=top_p,
+            max_new_tokens=max_new_tokens,
+            retry=retry,
+            prompt_type=prompt_type,
+            model=model,
+            tokenizer=tokenizer,
+        )
+
     from vllm import SamplingParams
 
     if isinstance(src_langs, str):

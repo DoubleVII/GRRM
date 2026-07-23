@@ -125,6 +125,46 @@ def get_GQM_prompt(
     )
 
 
+GQMPE_prompt_template = """Given a source text in {source_lang} and multiple translation candidates in {target_lang}. Perform a step by step analysis and comparison of the translation quality for the candidates. {task_prompt} Then provide a detailed post-edit analysis and a final improved translation in {target_lang}, selecting, combining, or editing the candidates as appropriate.
+
+Source text:
+```
+{source_text}
+```
+
+{candidate_prompts}"""
+
+
+def get_GQMPE_prompt(
+    source_lang,
+    target_lang,
+    source_text,
+    mt_texts,
+    prompt_format: str = "ranking_score",
+):
+    if len(source_lang) == 2 and source_lang in LANG_MAP:
+        source_lang = LANG_MAP[source_lang]
+    if len(target_lang) == 2 and target_lang in LANG_MAP:
+        target_lang = LANG_MAP[target_lang]
+    if len(mt_texts) == 1:
+        raise ValueError("Only support multiple candidates.")
+    if len(mt_texts) > len(candidate_identifiers):
+        raise ValueError(f"Only support {len(candidate_identifiers)} candidates.")
+
+    task_prompt = get_task_prompt(prompt_format, add_example=False)
+    candidate_prompts = "".join(
+        candidate_prompt.format(candidate_identifiers[i], mt_text)
+        for i, mt_text in enumerate(mt_texts)
+    )
+    return GQMPE_prompt_template.format(
+        source_lang=source_lang,
+        target_lang=target_lang,
+        task_prompt=task_prompt,
+        source_text=source_text,
+        candidate_prompts=candidate_prompts,
+    )
+
+
 get_GQM_with_notes_prompt = get_GQM_prompt
 
 

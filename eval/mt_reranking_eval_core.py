@@ -111,6 +111,7 @@ def save_reranking_results_to_json(
     runs: int,
     prompt_type: str,
     ranking_prompt_type: str,
+    ranking_task_type: str,
     notes_list_per_item: Optional[list[Optional[str]]] = None,
     use_notes_mask_per_item: Optional[list[bool]] = None,
     difficulty_list_per_item: Optional[list] = None,
@@ -163,6 +164,7 @@ def save_reranking_results_to_json(
         "runs": runs,
         "prompt_type": prompt_type,
         "ranking_prompt_type": ranking_prompt_type,
+        "ranking_task_type": ranking_task_type,
         "metrics": valid_metrics,
         "items": items,
     }
@@ -209,6 +211,7 @@ def run_reranking_eval_core(
     metrics: list[str] = ["bleurt", "oss"],
     prompt_type: str = "codeblock-think",
     ranking_prompt_type: str = "ranking_score",
+    ranking_task_type: str = "gqm",
     add_example: bool = False,
     ranking_temperature: Optional[float] = None,
     ranking_top_p: Optional[float] = None,
@@ -219,6 +222,13 @@ def run_reranking_eval_core(
     difficulty_filter: int = 0,
     **kwargs,
 ):
+    if ranking_task_type not in {"gqm", "gqmpe"}:
+        raise ValueError("ranking_task_type must be one of {'gqm', 'gqmpe'}")
+    if ranking_task_type == "gqmpe" and use_notes:
+        raise ValueError("GQMPE reranking does not currently support notes.")
+    if ranking_task_type == "gqmpe" and add_example:
+        raise ValueError("GQMPE reranking does not support add_example.")
+
     data_id_list = _parse_data_id(data_id)
 
     if data_dir:
@@ -281,7 +291,7 @@ def run_reranking_eval_core(
     if ranking_max_new_tokens is None:
         ranking_max_new_tokens = max_new_tokens
 
-    print(f"Running GQM ranking: {runs * N} items ...")
+    print(f"Running {ranking_task_type.upper()} ranking: {runs * N} items ...")
     if ranking_model is None:
         ranking_vllm_kwargs = kwargs.get("ranking_vllm_kwargs", {})
         ranking_model, ranking_tokenizer = load_model_tokenizer(
@@ -298,6 +308,7 @@ def run_reranking_eval_core(
         top_p=ranking_top_p,
         max_new_tokens=ranking_max_new_tokens,
         prompt_type=ranking_prompt_type,
+        task_type=ranking_task_type,
         add_example=add_example,
         model=ranking_model,
         tokenizer=ranking_tokenizer,
@@ -446,6 +457,7 @@ def run_reranking_eval_core(
                 runs=runs,
                 prompt_type=prompt_type,
                 ranking_prompt_type=ranking_prompt_type,
+                ranking_task_type=ranking_task_type,
                 **save_kwargs,
             )
 
@@ -466,6 +478,7 @@ def run_reranking_eval_core(
         "lang_pairs": lang_pairs,
         "prompt_type": prompt_type,
         "ranking_prompt_type": ranking_prompt_type,
+        "ranking_task_type": ranking_task_type,
         "add_example": add_example,
         "data_dir": data_dir,
     }

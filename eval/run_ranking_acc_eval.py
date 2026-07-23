@@ -176,6 +176,7 @@ def run_rm_GQM_inference(
     add_prompt_example: bool = False,
     model=None,
     tokenizer=None,
+    task_type: str = "gqm",
 ):
     import inference.run_rm_GQM as run_rm_GQM
     
@@ -200,6 +201,7 @@ def run_rm_GQM_inference(
             top_p,
             max_new_tokens,
             prompt_type=prompt_type,
+            task_type=task_type,
             add_example=add_prompt_example,
             model=model,
             tokenizer=tokenizer,
@@ -300,8 +302,10 @@ def main(
             'ranking_score']. Defaults to "ranking_score".
         runs: Number of inference runs to perform for each sample. Results are
             aggregated across runs. Defaults to 4.
-        model_type: Type of model to evaluate. Must be one of ['grrm', 'sqmrm', 'drm'].
+        model_type: Type of model to evaluate. Must be one of
+            ['grrm', 'gqmpe', 'sqmrm', 'drm', 'comet_poly'].
             - 'grrm': Group Relative Reward Model (GQM)
+            - 'gqmpe': Combined GQM and post-edit model
             - 'sqmrm': Scalar Quality Metric (SQM) Generative Reward Model
             - 'drm':  Bradley-Terry Reward Model 
             Defaults to "grrm".
@@ -321,10 +325,13 @@ def main(
             f"prompt_type must be one of ['score', 'ranking', 'ranking_score']"
         )
     
-    if model_type not in ["grrm", "sqmrm", "drm", "comet_poly"]:
+    if model_type not in ["grrm", "gqmpe", "sqmrm", "drm", "comet_poly"]:
         raise ValueError(
-            f"model_type must be one of ['grrm', 'sqmrm', 'drm', 'comet_poly']"
+            "model_type must be one of "
+            "['grrm', 'gqmpe', 'sqmrm', 'drm', 'comet_poly']"
         )
+    if model_type == "gqmpe" and add_prompt_example:
+        raise ValueError("GQMPE ranking evaluation does not support add_prompt_example.")
 
     if isinstance(data_id, str):
         data_id_list = tuple(data_id.strip().split(","))
@@ -359,7 +366,7 @@ def main(
         lang_pairs[did] = lang_pair
 
     vllm_kwargs = kwargs.get("vllm_kwargs", {})
-    if model_type == "grrm":
+    if model_type in {"grrm", "gqmpe"}:
         from inference.run_rm_GQM import load_model_tokenizer
         model, tokenizer = load_model_tokenizer(model_path, **vllm_kwargs)
     elif model_type == "sqmrm":
@@ -372,7 +379,7 @@ def main(
     for did in data_id_list:
         df = dfs[did]
         
-        if model_type == "grrm":
+        if model_type in {"grrm", "gqmpe"}:
             score_for_runs = run_rm_GQM_inference(
                 df,
                 model_path,
@@ -384,6 +391,7 @@ def main(
                 add_prompt_example,
                 model=model,
                 tokenizer=tokenizer,
+                task_type="gqmpe" if model_type == "gqmpe" else "gqm",
             )
         elif model_type == "sqmrm":
             score_for_runs = run_rm_SQM_inference(
@@ -435,6 +443,7 @@ def main(
         "top_p": top_p,
         "max_new_tokens": max_new_tokens,
         "prompt_type": prompt_type,
+        "model_type": model_type,
         "runs": runs,
         "metrics": all_valid_metrics,
         "lang_pairs": lang_pairs,

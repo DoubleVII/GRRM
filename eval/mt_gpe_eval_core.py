@@ -17,6 +17,7 @@ from eval.run_mt_eval import (
 )
 from inference.run_gpe import func_call as direct_gpe_func_call
 from inference.run_gqm_gpe import func_call as gqm_gpe_func_call
+from inference.run_gqmpe import func_call as gqmpe_func_call
 from inference.run_mt import load_model_tokenizer
 import inference.run_mt as run_mt
 from utils.config import MT_TEST_DATA_META_INFO
@@ -223,8 +224,12 @@ def run_gpe_eval_core(
     gqm_prompt_type: str = "ranking_score",
     **kwargs,
 ):
-    if gpe_mode not in {"direct", "gqm_gpe"}:
-        raise ValueError("gpe_mode must be one of {'direct', 'gqm_gpe'}")
+    if gpe_mode not in {"direct", "gqm_gpe", "gqmpe"}:
+        raise ValueError(
+            "gpe_mode must be one of {'direct', 'gqm_gpe', 'gqmpe'}"
+        )
+    if gpe_mode == "gqmpe" and use_notes:
+        raise ValueError("GQMPE evaluation does not currently support notes.")
 
     data_id_list = _parse_data_id(data_id)
 
@@ -309,8 +314,11 @@ def run_gpe_eval_core(
         gpe_kwargs["notes_list"] = flat_notes_list
     if gpe_mode == "direct":
         gpe_func_call = direct_gpe_func_call
-    else:
+    elif gpe_mode == "gqm_gpe":
         gpe_func_call = gqm_gpe_func_call
+        gpe_kwargs["prompt_type"] = gqm_prompt_type
+    else:
+        gpe_func_call = gqmpe_func_call
         gpe_kwargs["prompt_type"] = gqm_prompt_type
     gpe_output = gpe_func_call(**gpe_kwargs)
     pe_flat = gpe_output["post_edit_mt"]
@@ -432,6 +440,14 @@ def run_gpe_eval_core(
                         [flat_values[r * N + start + i] for r in range(runs)]
                         for i in range(n)
                     ]
+            elif gpe_mode == "gqmpe":
+                gpe_extra_outputs_per_item = {}
+                for key in ("responses", "scores", "parsed"):
+                    flat_values = gpe_output[key]
+                    gpe_extra_outputs_per_item[key] = [
+                        [flat_values[r * N + start + i] for r in range(runs)]
+                        for i in range(n)
+                    ]
 
             save_gpe_results_to_json(
                 df=dfs_per_id[did],
@@ -453,7 +469,9 @@ def run_gpe_eval_core(
                 runs=runs,
                 prompt_type=prompt_type,
                 gpe_mode=gpe_mode,
-                gqm_prompt_type=gqm_prompt_type if gpe_mode == "gqm_gpe" else None,
+                gqm_prompt_type=(
+                    gqm_prompt_type if gpe_mode in {"gqm_gpe", "gqmpe"} else None
+                ),
                 gpe_extra_outputs_per_item=gpe_extra_outputs_per_item,
                 **save_kwargs,
             )
@@ -477,7 +495,7 @@ def run_gpe_eval_core(
         "gpe_mode": gpe_mode,
         "data_dir": data_dir,
     }
-    if gpe_mode == "gqm_gpe":
+    if gpe_mode in {"gqm_gpe", "gqmpe"}:
         wandb_config["gqm_prompt_type"] = gqm_prompt_type
     if use_notes:
         wandb_config["difficulty_filter"] = difficulty_filter

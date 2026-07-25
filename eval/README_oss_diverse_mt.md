@@ -21,9 +21,12 @@ To run the relaxed mode on the same sample:
 
 ```bash
 PROMPT_TYPE=codeblock \
-OUTPUT_PATH=results/oss_diverse_mt_eval_codeblock.json \
 ./run_oss_diverse_mt_eval.sh
 ```
+
+The default output path includes the prompt mode, for example
+`results/oss_diverse_mt_eval.codeblock.json`, so JSON and codeblock runs do not
+overwrite each other.
 
 Common overrides:
 
@@ -31,11 +34,18 @@ Common overrides:
 CUDA_VISIBLE_DEVICES=0,1 \
 DATA_IDS=seedx_challenge_zhen,seedx_challenge_enzh \
 MAX_SAMPLES=32 \
+RUNS=3 \
 OUTPUT_PATH=results/oss_diverse_mt_eval_32.json \
 ./run_oss_diverse_mt_eval.sh
 ```
 
-`MAX_SAMPLES` applies independently to each dataset. The summary reports the two-stage mean and failure counts. The diversity section reports stage-1 validity, segment/candidate counts, and exact duplicate rate.
+`MAX_SAMPLES` applies independently to each dataset. `RUNS` repeats OSS scoring
+of the same generated translations (the default launcher uses 3) without
+rerunning translation inference. The summary reports the averaged score,
+per-run dataset means, standard deviation, standard error, an approximate 95%
+normal confidence interval, and failure counts. Each item retains all run scores
+and evaluator responses. The diversity section reports stage-1 validity,
+segment/candidate counts, and exact duplicate rate.
 
 ## Inference only
 
@@ -59,4 +69,6 @@ To generate and evaluate only direct translations, without running either diverg
 ./run_oss_direct_mt_eval.sh
 ```
 
-It accepts the same `CUDA_VISIBLE_DEVICES`, `MODEL_PATH`, `DATA_IDS`, `MAX_SAMPLES`, and `OUTPUT_PATH` environment overrides as the end-to-end script.
+It accepts the same `CUDA_VISIBLE_DEVICES`, `MODEL_PATH`, `DATA_IDS`,
+`MAX_SAMPLES`, `OUTPUT_PATH`, and `RUNS` environment overrides as the
+end-to-end script.

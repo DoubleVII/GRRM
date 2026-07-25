@@ -1,20 +1,14 @@
 import json
-import math
 from pathlib import Path
 
 from eval.run_oss_diverse_mt_eval import (
     _load_data,
     _parse_data_ids,
-    _reference_list,
+    _score_translations,
+    _summary_for_indices,
 )
-from inference.run_oss_SQM import func_call as run_oss_sqm
 from inference.run_oss_SQM import init_oss_model
 from inference.run_oss_direct_mt import run_direct_stage
-
-
-def _mean(values):
-    valid = [float(value) for value in values if value is not None and not math.isnan(value)]
-    return sum(valid) / len(valid) if valid else None
 
 
 def main(
@@ -28,6 +22,7 @@ def main(
     top_p: float = 0.8,
     max_new_tokens: int = 4096,
     retry: int = 3,
+    runs: int = 1,
     gpu_memory_utilization: float = 0.9,
     max_model_len: int = 32768,
 ):
@@ -54,26 +49,16 @@ def main(
         retry=retry,
     )
 
-    scores = [None] * len(frame)
-    evaluator_responses = [None] * len(frame)
-    valid_indices = [
-        index for index, translation in enumerate(direct["translations"])
-        if translation
-    ]
-    if valid_indices:
-        references = _reference_list(frame)
-        evaluation = run_oss_sqm(
-            src_list=[frame.iloc[index]["src_text"] for index in valid_indices],
-            mt_list=[direct["translations"][index] for index in valid_indices],
-            src_langs=[frame.iloc[index]["src_lang"] for index in valid_indices],
-            trg_langs=[frame.iloc[index]["trg_lang"] for index in valid_indices],
-            ref_list=[references[index] for index in valid_indices],
-            model=model,
-            model_path=model_path,
-        )
-        for local_index, original_index in enumerate(valid_indices):
-            scores[original_index] = evaluation["scores"][local_index]
-            evaluator_responses[original_index] = evaluation["response"][local_index]
+    evaluation = _score_translations(
+        frame,
+        direct["translations"],
+        model,
+        model_path,
+        runs=runs,
+    )
+    scores = evaluation["scores"]
+    scores_by_run = evaluation["scores_by_run"]
+    evaluator_responses_by_run = evaluation["responses_by_run"]
 
     summaries = {}
     for current_data_id in (*data_ids, "overall"):
@@ -82,14 +67,13 @@ def main(
             if current_data_id == "overall"
             else frame.index[frame["data_id"] == current_data_id].tolist()
         )
-        summaries[current_data_id] = {
-            "item_count": len(indices),
-            "direct_mean": _mean([scores[index] for index in indices]),
-            "generation_failures": sum(
-                not direct["translations"][index] for index in indices
-            ),
-            "evaluation_failures": sum(scores[index] is None for index in indices),
-        }
+        summaries[current_data_id] = _summary_for_indices(
+            indices,
+            scores,
+            scores_by_run,
+            direct["translations"],
+            score_name="direct_mean",
+        )
 
     items = []
     for index, row in frame.iterrows():
@@ -104,7 +88,12 @@ def main(
             "direct_translation": direct["translations"][index],
             "direct_response": direct["responses"][index],
             "direct_score": scores[index],
-            "direct_evaluator_response": evaluator_responses[index],
+            "direct_evaluator_response": evaluator_responses_by_run[0][index],
+            "direct_scores": [run_scores[index] for run_scores in scores_by_run],
+            "direct_evaluator_responses": [
+                run_responses[index]
+                for run_responses in evaluator_responses_by_run
+            ],
         })
 
     payload = {
@@ -118,6 +107,7 @@ def main(
             "top_p": top_p,
             "max_new_tokens": max_new_tokens,
             "retry": retry,
+            "runs": runs,
         },
         "summary": summaries,
         "items": items,

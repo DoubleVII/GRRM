@@ -93,7 +93,9 @@ The source and a divergent analysis with local candidates are provided below. Cr
 
 Requirements:
 - Translate the complete source faithfully without additions or omissions.
-- Produce a natural, internally consistent {target_lang} text, not a stitched list of fragments.
+- Treat segment boundaries and local candidates only as analysis aids. First construct a complete draft, freely rewriting across segment boundaries instead of concatenating candidate phrases.
+- Then perform a mandatory whole-text polish pass: improve idiomatic phrasing, collocations, sentence structure, cohesion, punctuation, and register so the result reads as an originally written {target_lang} text rather than a stitched list of fragments.
+- After polishing, check the full translation against the source again. Fluency edits must not change meaning, factual details, named entities, numbers, negation, emphasis, or tone.
 - Preserve the source's intended tone and formatting where appropriate.
 - Output only the final translation between the exact tags below. Do not include analysis, labels, Markdown fences, or any text outside the tags.
 

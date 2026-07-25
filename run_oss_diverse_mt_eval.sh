@@ -5,12 +5,11 @@ export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 export WANDB_MODE="${WANDB_MODE:-offline}"
 
 MODEL_PATH="${MODEL_PATH:-/home/zfs01/yangs/LLM/openai/gpt-oss-120b}"
-DATA_IDS="${DATA_IDS:-seedx_challenge_zhen}"
+DATA_IDS="${DATA_IDS:-seedx_challenge_zhen,seedx_challenge_enzh,wmt23_zh_en,wmt24pp_en_zh}"
 MAX_SAMPLES="${MAX_SAMPLES:-0}"
-OUTPUT_PATH="${OUTPUT_PATH:-results/oss_diverse_mt_eval.json}"
 PROMPT_TYPE="${PROMPT_TYPE:-json}"
-
-DATA_IDS=seedx_challenge_zhen,seedx_challenge_enzh,wmt23_zh_en,wmt24pp_en_zh
+OUTPUT_PATH="${OUTPUT_PATH:-results/oss_diverse_mt_eval.${PROMPT_TYPE}.json}"
+RUNS="${RUNS:-3}"
 
 echo "PROMPT_TYPE=${PROMPT_TYPE}"
 
@@ -29,5 +28,6 @@ echo "PROMPT_TYPE=${PROMPT_TYPE}"
   --final_top_p 0.8 \
   --stage1_max_tokens 8192 \
   --final_max_tokens 4096 \
+  --runs "${RUNS}" \
   --gpu_memory_utilization 0.9 \
   --max_model_len 32768

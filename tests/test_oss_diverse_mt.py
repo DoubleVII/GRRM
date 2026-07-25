@@ -1,6 +1,9 @@
 import unittest
 from unittest.mock import patch
 
+import pandas as pd
+
+from eval.run_oss_diverse_mt_eval import _score_translations, _summary_for_indices
 from inference.oss_diverse_mt_prompts import (
     build_convergent_prompt,
     build_direct_prompt,
@@ -55,6 +58,9 @@ class OssDiverseMtTest(unittest.TestCase):
         self.assertIn('"segments"', divergent)
         self.assertIn("Do not choose or compose a final translation", divergent)
         self.assertIn("<divergent_analysis>", convergent)
+        self.assertIn("mandatory whole-text polish pass", convergent)
+        self.assertIn("rewriting across segment boundaries", convergent)
+        self.assertIn("check the full translation against the source again", convergent)
         self.assertNotIn("<divergent_analysis>", direct)
         self.assertIn("<final_translation>", convergent)
         self.assertIn("<final_translation>", direct)
@@ -76,6 +82,48 @@ Segment: Hello
         self.assertNotIn('"segments"', prompt)
         self.assertEqual(extract_codeblock_response(response), response)
         self.assertIsNone(extract_codeblock_response("Segment: Hello"))
+
+    @patch("eval.run_oss_diverse_mt_eval.run_oss_sqm")
+    def test_evaluation_runs_repeat_scoring_and_average_per_item(self, run_oss_sqm):
+        frame = pd.DataFrame(
+            {
+                "src_text": ["one", "two"],
+                "trg_text": ["一", "二"],
+                "src_lang": ["en", "en"],
+                "trg_lang": ["zh", "zh"],
+            }
+        )
+        run_oss_sqm.return_value = {
+            "scores": [80, 90, 100, 70, 90, 80],
+            "response": [f"response-{index}" for index in range(6)],
+        }
+
+        result = _score_translations(
+            frame, ["一", "二"], object(), "unused", runs=3
+        )
+
+        self.assertEqual(
+            run_oss_sqm.call_args.kwargs["src_list"],
+            ["one", "two", "one", "two", "one", "two"],
+        )
+        self.assertEqual(
+            result["scores_by_run"], [[80, 90], [100, 70], [90, 80]]
+        )
+        self.assertEqual(result["scores"], [90, 80])
+
+        summary = _summary_for_indices(
+            [0, 1], result["scores"], result["scores_by_run"], ["一", "二"]
+        )
+        self.assertEqual(summary["run_means"], [85, 85, 85])
+        self.assertEqual(summary["two_stage_mean"], 85)
+        self.assertEqual(summary["evaluation_runs"], 3)
+
+    def test_evaluation_runs_must_be_positive(self):
+        frame = pd.DataFrame(
+            {"src_text": [], "trg_text": [], "src_lang": [], "trg_lang": []}
+        )
+        with self.assertRaisesRegex(ValueError, "runs must be at least 1"):
+            _score_translations(frame, [], object(), "unused", runs=0)
 
     @patch("inference.run_oss_diverse_mt.run_convergent_stage")
     @patch("inference.run_oss_diverse_mt.run_divergent_stage")

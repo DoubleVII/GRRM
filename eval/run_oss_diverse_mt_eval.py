@@ -1,5 +1,6 @@
 import json
 import math
+import statistics
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -59,29 +60,56 @@ def _score_translations(
     translations: list[Optional[str]],
     model,
     model_path: str,
-) -> tuple[list[Optional[float]], list[Optional[str]]]:
+    runs: int = 1,
+) -> dict:
+    if runs < 1:
+        raise ValueError("runs must be at least 1")
     valid_indices = [
         index for index, translation in enumerate(translations) if translation
     ]
-    scores = [None] * len(frame)
-    responses = [None] * len(frame)
+    scores_by_run = [[None] * len(frame) for _ in range(runs)]
+    responses_by_run = [[None] * len(frame) for _ in range(runs)]
     if not valid_indices:
-        return scores, responses
+        return {
+            "scores": [None] * len(frame),
+            "scores_by_run": scores_by_run,
+            "responses_by_run": responses_by_run,
+        }
 
     references = _reference_list(frame)
+    src_list = [frame.iloc[index]["src_text"] for index in valid_indices]
+    mt_list = [translations[index] for index in valid_indices]
+    src_langs = [frame.iloc[index]["src_lang"] for index in valid_indices]
+    trg_langs = [frame.iloc[index]["trg_lang"] for index in valid_indices]
+    ref_list = [references[index] for index in valid_indices]
     result = run_oss_sqm(
-        src_list=[frame.iloc[index]["src_text"] for index in valid_indices],
-        mt_list=[translations[index] for index in valid_indices],
-        src_langs=[frame.iloc[index]["src_lang"] for index in valid_indices],
-        trg_langs=[frame.iloc[index]["trg_lang"] for index in valid_indices],
-        ref_list=[references[index] for index in valid_indices],
+        src_list=src_list * runs,
+        mt_list=mt_list * runs,
+        src_langs=src_langs * runs,
+        trg_langs=trg_langs * runs,
+        ref_list=ref_list * runs,
         model=model,
         model_path=model_path,
     )
-    for local_index, original_index in enumerate(valid_indices):
-        scores[original_index] = result["scores"][local_index]
-        responses[original_index] = result["response"][local_index]
-    return scores, responses
+    valid_count = len(valid_indices)
+    for run_index in range(runs):
+        offset = run_index * valid_count
+        for local_index, original_index in enumerate(valid_indices):
+            scores_by_run[run_index][original_index] = result["scores"][
+                offset + local_index
+            ]
+            responses_by_run[run_index][original_index] = result["response"][
+                offset + local_index
+            ]
+    scores = [
+        _mean([run_scores[index] for run_scores in scores_by_run])
+        for index in range(len(frame))
+    ]
+    return {
+        "scores": scores,
+        "scores_by_run": scores_by_run,
+        "responses_by_run": responses_by_run,
+    }
 
 
 def _mean(values: list[Optional[float]]) -> Optional[float]:
@@ -130,20 +158,53 @@ def _diversity_stats(analyses: list, prompt_type: str) -> dict:
 def _summary_for_indices(
     indices: list[int],
     scores: list[Optional[float]],
+    scores_by_run: list[list[Optional[float]]],
     translations: list[Optional[str]],
+    score_name: str = "two_stage_mean",
 ) -> dict:
-    return {
+    run_means = [
+        _mean([run_scores[index] for index in indices])
+        for run_scores in scores_by_run
+    ]
+    valid_run_means = [value for value in run_means if value is not None]
+    score_std = (
+        statistics.stdev(valid_run_means) if len(valid_run_means) > 1 else None
+    )
+    score_sem = (
+        score_std / math.sqrt(len(valid_run_means)) if score_std is not None else None
+    )
+    mean_score = _mean([scores[index] for index in indices])
+    ci95 = (
+        [
+            max(0.0, mean_score - 1.96 * score_sem),
+            min(100.0, mean_score + 1.96 * score_sem),
+        ]
+        if mean_score is not None and score_sem is not None
+        else None
+    )
+    summary = {
         "item_count": len(indices),
-        "two_stage_mean": _mean([scores[index] for index in indices]),
+        score_name: mean_score,
+        "evaluation_runs": len(scores_by_run),
+        "run_means": run_means,
+        "run_mean_std": score_std,
+        "run_mean_sem": score_sem,
+        "run_mean_ci95_normal": ci95,
         "generation_failures": sum(not translations[index] for index in indices),
         "evaluation_failures": sum(scores[index] is None for index in indices),
+        "evaluation_failures_across_runs": sum(
+            run_scores[index] is None
+            for run_scores in scores_by_run
+            for index in indices
+        ),
     }
+    return summary
 
 
 def main(
     data_id="seedx_challenge_zhen",
     model_path: str = "/home/zfs01/yangs/LLM/openai/gpt-oss-120b",
-    output_path: str = "results/oss_diverse_mt_eval.json",
+    output_path: Optional[str] = None,
     max_samples: int = 16,
     seed: int = 42,
     reasoning_effort: str = "medium",
@@ -156,6 +217,7 @@ def main(
     final_top_p: float = 0.8,
     stage1_max_tokens: int = 8192,
     final_max_tokens: int = 4096,
+    runs: int = 1,
     retry: int = 3,
     gpu_memory_utilization: float = 0.9,
     max_model_len: int = 32768,
@@ -163,6 +225,10 @@ def main(
     """Generate and evaluate divergent/convergent translations only."""
     if prompt_type not in {"json", "codeblock"}:
         raise ValueError("prompt_type must be one of: json, codeblock")
+    if runs < 1:
+        raise ValueError("runs must be at least 1")
+    if output_path is None:
+        output_path = f"results/oss_diverse_mt_eval.{prompt_type}.json"
     data_ids = _parse_data_ids(data_id)
     frame = _load_data(data_ids, max_samples, seed)
     print(f"Loaded {len(frame)} items from {', '.join(data_ids)}")
@@ -191,18 +257,21 @@ def main(
         retry=retry,
     )
     translations = pipeline["convergent"]["translations"]
-    scores, evaluator_responses = _score_translations(
-        frame, translations, model, model_path
+    evaluation = _score_translations(
+        frame, translations, model, model_path, runs=runs
     )
+    scores = evaluation["scores"]
+    scores_by_run = evaluation["scores_by_run"]
+    evaluator_responses_by_run = evaluation["responses_by_run"]
 
     summaries = {}
     for current_data_id in data_ids:
         indices = frame.index[frame["data_id"] == current_data_id].tolist()
         summaries[current_data_id] = _summary_for_indices(
-            indices, scores, translations
+            indices, scores, scores_by_run, translations
         )
     summaries["overall"] = _summary_for_indices(
-        list(range(len(frame))), scores, translations
+        list(range(len(frame))), scores, scores_by_run, translations
     )
 
     items = []
@@ -220,7 +289,12 @@ def main(
             "two_stage_translation": translations[index],
             "two_stage_response": pipeline["convergent"]["responses"][index],
             "two_stage_score": scores[index],
-            "two_stage_evaluator_response": evaluator_responses[index],
+            "two_stage_evaluator_response": evaluator_responses_by_run[0][index],
+            "two_stage_scores": [run_scores[index] for run_scores in scores_by_run],
+            "two_stage_evaluator_responses": [
+                run_responses[index]
+                for run_responses in evaluator_responses_by_run
+            ],
         })
 
     payload = {
@@ -240,6 +314,7 @@ def main(
             "stage1_max_tokens": stage1_max_tokens,
             "final_max_tokens": final_max_tokens,
             "retry": retry,
+            "runs": runs,
         },
         "diversity": _diversity_stats(
             pipeline["divergent"]["analyses"], prompt_type

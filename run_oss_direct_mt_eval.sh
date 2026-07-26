@@ -8,7 +8,7 @@ MODEL_PATH="${MODEL_PATH:-/home/zfs01/yangs/LLM/openai/gpt-oss-120b}"
 DATA_IDS="${DATA_IDS:-seedx_challenge_zhen,seedx_challenge_enzh,wmt23_zh_en,wmt24pp_en_zh}"
 MAX_SAMPLES="${MAX_SAMPLES:-0}"
 OUTPUT_PATH="${OUTPUT_PATH:-results/oss_direct_mt_eval.json}"
-RUNS="${RUNS:-3}"
+RUNS="${RUNS:-4}"
 
 .venv/bin/python -m eval.run_oss_direct_mt_eval \
   --data_id "${DATA_IDS}" \

@@ -8,7 +8,7 @@ import pandas as pd
 
 from inference.run_oss_SQM import func_call as run_oss_sqm
 from inference.run_oss_SQM import init_oss_model
-from inference.run_oss_diverse_mt import run_pipeline
+from inference.run_oss_diverse_mt import normalize_bool, run_pipeline
 from utils.config import MT_TEST_DATA_META_INFO
 
 
@@ -117,11 +117,14 @@ def _mean(values: list[Optional[float]]) -> Optional[float]:
     return sum(valid) / len(valid) if valid else None
 
 
-def _diversity_stats(analyses: list, prompt_type: str) -> dict:
+def _diversity_stats(
+    analyses: list, prompt_type: str, candidate_confidence: bool = False
+) -> dict:
     segment_counts = []
     candidate_counts = []
     duplicate_counts = 0
     total_candidates = 0
+    confidence_counts = {"high": 0, "medium": 0, "low": 0}
     for analysis in analyses:
         if not analysis or not isinstance(analysis, dict) or "segments" not in analysis:
             continue
@@ -133,8 +136,12 @@ def _diversity_stats(analyses: list, prompt_type: str) -> dict:
             normalized = {candidate.casefold() for candidate in candidates}
             duplicate_counts += len(candidates) - len(normalized)
             total_candidates += len(candidates)
+            if candidate_confidence:
+                for candidate in segment["candidates"]:
+                    confidence_counts[candidate["confidence"]] += 1
     return {
         "prompt_type": prompt_type,
+        "candidate_confidence": candidate_confidence,
         "valid_stage1": sum(analysis is not None for analysis in analyses),
         "failed_stage1": sum(analysis is None for analysis in analyses),
         "mean_stage1_chars": _mean([
@@ -152,7 +159,30 @@ def _diversity_stats(analyses: list, prompt_type: str) -> dict:
             if prompt_type == "json" and total_candidates
             else None
         ),
+        "confidence_counts": (
+            confidence_counts
+            if prompt_type == "json" and candidate_confidence
+            else None
+        ),
+        "confidence_rates": (
+            {
+                level: count / total_candidates
+                for level, count in confidence_counts.items()
+            }
+            if prompt_type == "json" and candidate_confidence and total_candidates
+            else None
+        ),
     }
+
+
+def _prompt_variant(
+    prompt_type: str, polish: bool, candidate_confidence: bool
+) -> str:
+    return ".".join([
+        prompt_type,
+        "polish" if polish else "no-polish",
+        "confidence" if candidate_confidence else "no-confidence",
+    ])
 
 
 def _summary_for_indices(
@@ -211,6 +241,8 @@ def main(
     min_candidates: int = 3,
     max_candidates: int = 6,
     prompt_type: str = "json",
+    polish: bool = True,
+    candidate_confidence: bool = False,
     divergent_temperature: float = 0.8,
     divergent_top_p: float = 0.95,
     final_temperature: float = 0.3,
@@ -223,12 +255,17 @@ def main(
     max_model_len: int = 32768,
 ):
     """Generate and evaluate divergent/convergent translations only."""
+    polish = normalize_bool(polish, "polish")
+    candidate_confidence = normalize_bool(
+        candidate_confidence, "candidate_confidence"
+    )
     if prompt_type not in {"json", "codeblock"}:
         raise ValueError("prompt_type must be one of: json, codeblock")
     if runs < 1:
         raise ValueError("runs must be at least 1")
     if output_path is None:
-        output_path = f"results/oss_diverse_mt_eval.{prompt_type}.json"
+        variant = _prompt_variant(prompt_type, polish, candidate_confidence)
+        output_path = f"results/oss_diverse_mt_eval.{variant}.json"
     data_ids = _parse_data_ids(data_id)
     frame = _load_data(data_ids, max_samples, seed)
     print(f"Loaded {len(frame)} items from {', '.join(data_ids)}")
@@ -248,6 +285,8 @@ def main(
         min_candidates=min_candidates,
         max_candidates=max_candidates,
         prompt_type=prompt_type,
+        polish=polish,
+        candidate_confidence=candidate_confidence,
         divergent_temperature=divergent_temperature,
         divergent_top_p=divergent_top_p,
         final_temperature=final_temperature,
@@ -307,6 +346,8 @@ def main(
             "min_candidates": min_candidates,
             "max_candidates": max_candidates,
             "prompt_type": prompt_type,
+            "polish": polish,
+            "candidate_confidence": candidate_confidence,
             "divergent_temperature": divergent_temperature,
             "divergent_top_p": divergent_top_p,
             "final_temperature": final_temperature,
@@ -317,7 +358,9 @@ def main(
             "runs": runs,
         },
         "diversity": _diversity_stats(
-            pipeline["divergent"]["analyses"], prompt_type
+            pipeline["divergent"]["analyses"],
+            prompt_type,
+            candidate_confidence=candidate_confidence,
         ),
         "summary": summaries,
         "items": items,

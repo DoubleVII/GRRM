@@ -8,10 +8,24 @@ MODEL_PATH="${MODEL_PATH:-/home/zfs01/yangs/LLM/openai/gpt-oss-120b}"
 DATA_IDS="${DATA_IDS:-seedx_challenge_zhen,seedx_challenge_enzh,wmt23_zh_en,wmt24pp_en_zh}"
 MAX_SAMPLES="${MAX_SAMPLES:-0}"
 PROMPT_TYPE="${PROMPT_TYPE:-json}"
-OUTPUT_PATH="${OUTPUT_PATH:-results/oss_diverse_mt_eval.${PROMPT_TYPE}.json}"
-RUNS="${RUNS:-3}"
+POLISH="${POLISH:-true}"
+CANDIDATE_CONFIDENCE="${CANDIDATE_CONFIDENCE:-true}"
+RUNS="${RUNS:-4}"
 
-echo "PROMPT_TYPE=${PROMPT_TYPE}"
+case "${POLISH}" in
+  true) POLISH_VARIANT="polish" ;;
+  false) POLISH_VARIANT="no-polish" ;;
+  *) echo "POLISH must be true or false" >&2; exit 2 ;;
+esac
+case "${CANDIDATE_CONFIDENCE}" in
+  true) CONFIDENCE_VARIANT="confidence" ;;
+  false) CONFIDENCE_VARIANT="no-confidence" ;;
+  *) echo "CANDIDATE_CONFIDENCE must be true or false" >&2; exit 2 ;;
+esac
+VARIANT="${PROMPT_TYPE}.${POLISH_VARIANT}.${CONFIDENCE_VARIANT}"
+OUTPUT_PATH="${OUTPUT_PATH:-results/oss_diverse_mt_eval.${VARIANT}.json}"
+
+echo "VARIANT=${VARIANT}"
 
 .venv/bin/python -m eval.run_oss_diverse_mt_eval \
   --data_id "${DATA_IDS}" \
@@ -19,6 +33,8 @@ echo "PROMPT_TYPE=${PROMPT_TYPE}"
   --output_path "${OUTPUT_PATH}" \
   --max_samples "${MAX_SAMPLES}" \
   --prompt_type "${PROMPT_TYPE}" \
+  --polish "${POLISH}" \
+  --candidate_confidence "${CANDIDATE_CONFIDENCE}" \
   --reasoning_effort medium \
   --min_candidates 3 \
   --max_candidates 6 \

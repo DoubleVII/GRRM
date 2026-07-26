@@ -9,9 +9,18 @@ Stage 1 supports two prompt modes through `PROMPT_TYPE` / `--prompt_type`:
 - `json` (default): the original strict JSON schema, with structural validation and structural diversity statistics.
 - `codeblock`: a prep-notes-style response containing brief analysis followed by one free-form Markdown code block. The complete response is passed to stage 2 without JSON parsing. Structural diversity statistics are `null` in this mode.
 
+Two independent switches control the prompt ablations:
+
+- `CANDIDATE_CONFIDENCE=true|false`: stage 1 labels every candidate `high`,
+  `medium`, or `low`; stage 2 treats the label as a calibrated aid and still
+  verifies the candidate against the source.
+- `POLISH=true|false`: stage 2 performs an explicit whole-text polishing and
+  source-verification pass after composing the candidates.
+
 ## Two-stage evaluation
 
-The default command randomly samples 16 rows from `seedx_challenge_zhen` and uses CUDA devices 0 and 1:
+The default command evaluates all configured datasets, enables both switches,
+uses four evaluator runs, and uses CUDA devices 0 and 1:
 
 ```bash
 ./run_oss_diverse_mt_eval.sh
@@ -24,9 +33,18 @@ PROMPT_TYPE=codeblock \
 ./run_oss_diverse_mt_eval.sh
 ```
 
-The default output path includes the prompt mode, for example
-`results/oss_diverse_mt_eval.codeblock.json`, so JSON and codeblock runs do not
-overwrite each other.
+The default output path includes the prompt mode and both switch states, for
+example `results/oss_diverse_mt_eval.codeblock.polish.confidence.json`, so
+ablations do not overwrite each other.
+
+Run the complete 2x2 ablation with commands such as:
+
+```bash
+POLISH=true  CANDIDATE_CONFIDENCE=true  ./run_oss_diverse_mt_eval.sh
+POLISH=true  CANDIDATE_CONFIDENCE=false ./run_oss_diverse_mt_eval.sh
+POLISH=false CANDIDATE_CONFIDENCE=true  ./run_oss_diverse_mt_eval.sh
+POLISH=false CANDIDATE_CONFIDENCE=false ./run_oss_diverse_mt_eval.sh
+```
 
 Common overrides:
 
@@ -34,18 +52,18 @@ Common overrides:
 CUDA_VISIBLE_DEVICES=0,1 \
 DATA_IDS=seedx_challenge_zhen,seedx_challenge_enzh \
 MAX_SAMPLES=32 \
-RUNS=3 \
+RUNS=4 \
 OUTPUT_PATH=results/oss_diverse_mt_eval_32.json \
 ./run_oss_diverse_mt_eval.sh
 ```
 
 `MAX_SAMPLES` applies independently to each dataset. `RUNS` repeats OSS scoring
-of the same generated translations (the default launcher uses 3) without
+of the same generated translations (the default launcher uses 4) without
 rerunning translation inference. The summary reports the averaged score,
 per-run dataset means, standard deviation, standard error, an approximate 95%
 normal confidence interval, and failure counts. Each item retains all run scores
-and evaluator responses. The diversity section reports stage-1 validity,
-segment/candidate counts, and exact duplicate rate.
+and evaluator responses. For JSON confidence runs, the diversity section also
+reports the number and proportion of `high`, `medium`, and `low` candidates.
 
 ## Inference only
 

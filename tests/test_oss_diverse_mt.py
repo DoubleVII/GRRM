@@ -3,7 +3,11 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from eval.run_oss_diverse_mt_eval import _score_translations, _summary_for_indices
+from eval.run_oss_diverse_mt_eval import (
+    _prompt_variant,
+    _score_translations,
+    _summary_for_indices,
+)
 from inference.oss_diverse_mt_prompts import (
     build_convergent_prompt,
     build_direct_prompt,
@@ -13,6 +17,7 @@ from inference.run_oss_diverse_mt import (
     extract_codeblock_response,
     extract_final_translation,
     extract_json_object,
+    normalize_bool,
     run_pipeline,
     validate_divergent_result,
 )
@@ -39,6 +44,36 @@ class OssDiverseMtTest(unittest.TestCase):
         }
         self.assertIsNone(validate_divergent_result(parsed))
 
+    def test_candidate_confidence_prompt_and_validation(self):
+        prompt = build_divergent_prompt(
+            "en", "zh", "Hello", candidate_confidence=True
+        )
+        self.assertIn('"confidence": "high"', prompt)
+        self.assertIn("Confidence is not a diversity dimension", prompt)
+        self.assertIn("Most candidates for an unambiguous unit", prompt)
+
+        candidate = {"translation": "你好", "angle": "neutral"}
+        parsed = {
+            "source_analysis": "x",
+            "segments": [{
+                "segment_id": 1,
+                "source_span": "Hello",
+                "analysis": "greeting",
+                "candidates": [candidate],
+            }],
+        }
+        self.assertIsNone(
+            validate_divergent_result(parsed, candidate_confidence=True)
+        )
+        candidate["confidence"] = "certain"
+        self.assertIsNone(
+            validate_divergent_result(parsed, candidate_confidence=True)
+        )
+        candidate["confidence"] = "high"
+        self.assertEqual(
+            validate_divergent_result(parsed, candidate_confidence=True), parsed
+        )
+
 
     def test_final_translation_extraction(self):
         self.assertEqual(
@@ -64,6 +99,41 @@ class OssDiverseMtTest(unittest.TestCase):
         self.assertNotIn("<divergent_analysis>", direct)
         self.assertIn("<final_translation>", convergent)
         self.assertIn("<final_translation>", direct)
+
+    def test_polish_and_confidence_are_independent_prompt_switches(self):
+        context = {"source_analysis": "x", "segments": []}
+        plain = build_convergent_prompt(
+            "en", "zh", "Hello", context, polish=False
+        )
+        combined = build_convergent_prompt(
+            "en",
+            "zh",
+            "Hello",
+            context,
+            polish=True,
+            candidate_confidence=True,
+        )
+        self.assertNotIn("mandatory whole-text polish pass", plain)
+        self.assertNotIn("calibrated aid", plain)
+        self.assertIn("mandatory whole-text polish pass", combined)
+        self.assertIn("calibrated aid", combined)
+        self.assertIn("Reject even a high-confidence candidate", combined)
+
+    def test_prompt_variant_names_all_switches(self):
+        self.assertEqual(
+            _prompt_variant("json", True, True), "json.polish.confidence"
+        )
+        self.assertEqual(
+            _prompt_variant("codeblock", False, False),
+            "codeblock.no-polish.no-confidence",
+        )
+
+    def test_cli_boolean_normalization(self):
+        self.assertTrue(normalize_bool("true", "flag"))
+        self.assertFalse(normalize_bool("false", "flag"))
+        self.assertFalse(normalize_bool(False, "flag"))
+        with self.assertRaisesRegex(ValueError, "flag must be a boolean"):
+            normalize_bool("sometimes", "flag")
 
     def test_codeblock_prompt_and_extraction_are_free_form(self):
         prompt = build_divergent_prompt(
@@ -141,10 +211,19 @@ Segment: Hello
             "thinking": [None],
         }
         result = run_pipeline(
-            ["hello"], ["en"], ["zh"], model=object(), model_path="unused"
+            ["hello"],
+            ["en"],
+            ["zh"],
+            model=object(),
+            model_path="unused",
+            polish=False,
+            candidate_confidence=True,
         )
         self.assertEqual(set(result), {"divergent", "convergent"})
         self.assertNotIn("direct", result)
+        self.assertTrue(divergent_stage.call_args.kwargs["candidate_confidence"])
+        self.assertFalse(convergent_stage.call_args.kwargs["polish"])
+        self.assertTrue(convergent_stage.call_args.kwargs["candidate_confidence"])
 
 
 if __name__ == "__main__":

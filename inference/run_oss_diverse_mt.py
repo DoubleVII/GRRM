@@ -21,6 +21,18 @@ from inference.oss_diverse_mt_prompts import (
 from inference.run_oss_SQM import init_oss_model, load_encoding
 
 
+def normalize_bool(value, name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    raise ValueError(f"{name} must be a boolean")
+
+
 def _system_content(reasoning_effort: Optional[str]) -> SystemContent:
     content = SystemContent.new()
     if reasoning_effort is None:
@@ -73,7 +85,9 @@ def extract_codeblock_response(text: str) -> Optional[str]:
     return text
 
 
-def validate_divergent_result(value: Optional[dict]) -> Optional[dict]:
+def validate_divergent_result(
+    value: Optional[dict], candidate_confidence: bool = False
+) -> Optional[dict]:
     if not isinstance(value, dict) or not isinstance(value.get("source_analysis"), str):
         return None
     segments = value.get("segments")
@@ -97,6 +111,12 @@ def validate_divergent_result(value: Optional[dict]) -> Optional[dict]:
             if not isinstance(candidate.get("translation"), str) or not candidate["translation"].strip():
                 return None
             if not isinstance(candidate.get("angle"), str):
+                return None
+            if candidate_confidence and candidate.get("confidence") not in {
+                "high",
+                "medium",
+                "low",
+            }:
                 return None
     return value
 
@@ -233,6 +253,7 @@ def run_divergent_stage(
     min_candidates: int = 3,
     max_candidates: int = 6,
     prompt_type: str = "json",
+    candidate_confidence: bool = False,
     temperature: float = 0.8,
     top_p: float = 0.95,
     max_tokens: int = 8192,
@@ -257,11 +278,17 @@ def run_divergent_stage(
             min_candidates,
             max_candidates,
             prompt_type=prompt_type,
+            candidate_confidence=candidate_confidence,
         )
         for source, sl, tl in zip(src_list, src_langs, trg_langs)
     ]
     parser = (
-        (lambda text: validate_divergent_result(extract_json_object(text)))
+        (
+            lambda text: validate_divergent_result(
+                extract_json_object(text),
+                candidate_confidence=candidate_confidence,
+            )
+        )
         if prompt_type == "json"
         else extract_codeblock_response
     )
@@ -291,6 +318,8 @@ def run_convergent_stage(
     model=None,
     model_path: str = "openai/gpt-oss-120b",
     reasoning_effort: Optional[str] = "medium",
+    polish: bool = True,
+    candidate_confidence: bool = False,
     temperature: float = 0.3,
     top_p: float = 0.8,
     max_tokens: int = 4096,
@@ -306,7 +335,14 @@ def run_convergent_stage(
     llm = init_oss_model(model_path) if model is None else model
     encoding = load_encoding()
     prompts = [
-        build_convergent_prompt(sl, tl, source, divergent)
+        build_convergent_prompt(
+            sl,
+            tl,
+            source,
+            divergent,
+            polish=polish,
+            candidate_confidence=candidate_confidence,
+        )
         for source, divergent, sl, tl in zip(
             src_list, divergent_results, src_langs, trg_langs
         )
@@ -339,6 +375,8 @@ def run_pipeline(
     min_candidates: int = 3,
     max_candidates: int = 6,
     prompt_type: str = "json",
+    polish: bool = True,
+    candidate_confidence: bool = False,
     divergent_temperature: float = 0.8,
     divergent_top_p: float = 0.95,
     final_temperature: float = 0.3,
@@ -357,6 +395,7 @@ def run_pipeline(
         min_candidates=min_candidates,
         max_candidates=max_candidates,
         prompt_type=prompt_type,
+        candidate_confidence=candidate_confidence,
         temperature=divergent_temperature,
         top_p=divergent_top_p,
         max_tokens=stage1_max_tokens,
@@ -381,6 +420,8 @@ def run_pipeline(
             model=model,
             model_path=model_path,
             reasoning_effort=reasoning_effort,
+            polish=polish,
+            candidate_confidence=candidate_confidence,
             temperature=final_temperature,
             top_p=final_top_p,
             max_tokens=final_max_tokens,
@@ -405,6 +446,8 @@ def main(
     min_candidates: int = 3,
     max_candidates: int = 6,
     prompt_type: str = "json",
+    polish: bool = True,
+    candidate_confidence: bool = False,
     divergent_temperature: float = 0.8,
     divergent_top_p: float = 0.95,
     final_temperature: float = 0.3,
@@ -418,6 +461,10 @@ def main(
     """Run divergent and convergent translation stages for a parquet file."""
     import pandas as pd
 
+    polish = normalize_bool(polish, "polish")
+    candidate_confidence = normalize_bool(
+        candidate_confidence, "candidate_confidence"
+    )
     if prompt_type not in {"json", "codeblock"}:
         raise ValueError("prompt_type must be one of: json, codeblock")
     frame = pd.read_parquet(input_path)
@@ -443,6 +490,8 @@ def main(
         min_candidates=min_candidates,
         max_candidates=max_candidates,
         prompt_type=prompt_type,
+        polish=polish,
+        candidate_confidence=candidate_confidence,
         divergent_temperature=divergent_temperature,
         divergent_top_p=divergent_top_p,
         final_temperature=final_temperature,
@@ -472,6 +521,8 @@ def main(
             "min_candidates": min_candidates,
             "max_candidates": max_candidates,
             "prompt_type": prompt_type,
+            "polish": polish,
+            "candidate_confidence": candidate_confidence,
             "divergent_temperature": divergent_temperature,
             "divergent_top_p": divergent_top_p,
             "final_temperature": final_temperature,

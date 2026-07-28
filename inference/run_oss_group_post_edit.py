@@ -112,6 +112,7 @@ def func_call(
     model=None,
     model_path: str = "gpt-oss-20b",
     reasoning_effort: str = None,
+    max_new_tokens: int = 8192,
 ):
     from vllm import SamplingParams
 
@@ -132,7 +133,12 @@ def func_call(
     encoding = load_encoding()
     stop_token_ids = encoding.stop_tokens_for_assistant_actions()
 
-    sampling_params = SamplingParams(max_tokens=8192, temperature=temperature, top_p=top_p, stop_token_ids=stop_token_ids)
+    sampling_params = SamplingParams(
+        max_tokens=max_new_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        stop_token_ids=stop_token_ids,
+    )
 
     vllm_inputs = prepare_vllm_inputs(src_list, mt_list, notes_list, src_langs, trg_langs, encoding, reasoning_effort)
     indices = list(range(n))

@@ -3,8 +3,10 @@ import unittest
 from scripts.prepare_SFT_GPE_training_data import _output_paths
 from inference.run_oss_diverse_mt import extract_final_translation
 from inference.sft_mt_protocol import (
-    add_output_instruction,
     build_scd_followup_prompt,
+    build_scd_stage1_prompt,
+    build_sft_direct_prompt,
+    build_sft_gpe_prompt,
     format_sft_output,
     parse_sft_output,
     parse_task_output,
@@ -58,9 +60,22 @@ class SftMtProtocolTest(unittest.TestCase):
 
     def test_followup_uses_history_without_embedding_analysis(self):
         prompt = build_scd_followup_prompt("Chinese", "English")
-        self.assertIn("previous response", prompt)
+        self.assertIn("segment candidates above", prompt)
         self.assertNotIn("<divergent_analysis>", prompt)
-        self.assertIn("<thinking>", add_output_instruction("task"))
+        self.assertNotIn("<thinking>", prompt)
+
+    def test_training_prompts_are_short_and_omit_format_requirements(self):
+        prompts = [
+            build_sft_direct_prompt("en", "zh", "Hello"),
+            build_sft_gpe_prompt("en", "zh", "Hello", ["你好", "您好"]),
+            build_scd_stage1_prompt("en", "zh", "Hello"),
+            build_scd_followup_prompt("en", "zh"),
+        ]
+        for prompt in prompts:
+            self.assertNotIn("<thinking>", prompt)
+            self.assertNotIn("<response>", prompt)
+            self.assertNotIn("JSON", prompt)
+            self.assertNotIn("Output format", prompt)
 
 
 if __name__ == "__main__":

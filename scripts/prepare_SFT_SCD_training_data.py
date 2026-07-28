@@ -7,8 +7,8 @@ import pandas as pd
 from data.oss_mt_sft_data_utils import parse_scd_stage1_response
 from inference.run_oss_diverse_mt import extract_final_translation
 from inference.sft_mt_protocol import (
-    add_output_instruction,
     build_scd_followup_prompt,
+    build_scd_stage1_prompt,
     format_sft_output,
     parse_task_output,
 )
@@ -31,7 +31,7 @@ def main(
         raise ValueError("Initial SCD SFT training supports prompt_type=json")
     frame = pd.read_parquet(data_path)
     required = {
-        "src_text", "src_lang", "trg_lang", "scd_stage1_prompt",
+        "src_text", "src_lang", "trg_lang",
         "scd_stage1_thinking", "scd_stage1_response", "scd_stage1_parsed",
         "scd_stage2_thinking", "scd_stage2_response", "scd_translation",
         "scd_parser_valid",
@@ -75,7 +75,9 @@ def main(
         target_lang = LANG_MAP.get(row["trg_lang"], row["trg_lang"])
         followup = build_scd_followup_prompt(source_lang, target_lang)
         messages = [
-            {"role": "user", "content": add_output_instruction(row["scd_stage1_prompt"])},
+            {"role": "user", "content": build_scd_stage1_prompt(
+                row["src_lang"], row["trg_lang"], row["src_text"]
+            )},
             {"role": "assistant", "content": stage1_assistant},
             {"role": "user", "content": followup},
             {"role": "assistant", "content": stage2_assistant},

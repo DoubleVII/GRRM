@@ -3,11 +3,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Union
 
-from inference.oss_diverse_mt_prompts import (
-    build_direct_prompt,
-    build_divergent_prompt,
-)
-from inference.prompts import get_oss_group_post_edit_prompt
 from inference.run_mt import _block_extractor
 from inference.run_oss_diverse_mt import (
     extract_final_translation,
@@ -15,8 +10,10 @@ from inference.run_oss_diverse_mt import (
     validate_divergent_result,
 )
 from inference.sft_mt_protocol import (
-    add_output_instruction,
     build_scd_followup_prompt,
+    build_scd_stage1_prompt,
+    build_sft_direct_prompt,
+    build_sft_gpe_prompt,
     parse_task_output,
 )
 from utils.config import LANG_MAP
@@ -157,7 +154,7 @@ def run_direct_stage(
     src_langs, trg_langs = _normalize_languages(len(src_list), src_langs, trg_langs)
     messages = [[{
         "role": "user",
-        "content": add_output_instruction(build_direct_prompt(sl, tl, source)),
+        "content": build_sft_direct_prompt(sl, tl, source),
     }] for source, sl, tl in zip(src_list, src_langs, trg_langs)]
     outputs = generate_validated(
         engine,
@@ -190,10 +187,7 @@ def run_scd_pipeline(
 ) -> dict:
     stage1_messages = [[{
         "role": "user",
-        "content": add_output_instruction(build_divergent_prompt(
-            sl, tl, source, min_candidates, max_candidates,
-            prompt_type="json", candidate_confidence=False,
-        )),
+        "content": build_scd_stage1_prompt(sl, tl, source),
     }] for source, sl, tl in zip(src_list, src_langs, trg_langs)]
     stage1 = generate_validated(
         engine,
@@ -267,13 +261,12 @@ def run_gpe_pipeline(
     ]
     post_edit_messages = [[{
         "role": "user",
-        "content": add_output_instruction(get_oss_group_post_edit_prompt(
+        "content": build_sft_gpe_prompt(
             src_langs[index],
             trg_langs[index],
             src_list[index],
             [value["parsed"] for value in sampling["outputs"][index]],
-            None,
-        )),
+        ),
     }] for index in valid_indices]
     post_edit_local = generate_validated(
         engine,

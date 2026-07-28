@@ -14,6 +14,8 @@ task-specific response
 The outer protocol is parsed first. The response is then validated with the
 existing direct translation, group post-edit, or SCD JSON/final-translation
 parser. Invalid output is retried and never passed to the evaluator.
+Task prompts intentionally omit output-format instructions and detailed
+rubrics; the supervised responses teach the protocol and task preferences.
 
 ## SFT data
 

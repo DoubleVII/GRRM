@@ -2,22 +2,13 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+from utils.config import LANG_MAP, candidate_identifiers
+
 
 THINKING_OPEN = "<thinking>"
 THINKING_CLOSE = "</thinking>"
 RESPONSE_OPEN = "<response>"
 RESPONSE_CLOSE = "</response>"
-
-OUTPUT_INSTRUCTION = f"""Return the complete assistant output in exactly this format:
-{THINKING_OPEN}
-[your reasoning]
-{THINKING_CLOSE}
-{RESPONSE_OPEN}
-[the task response in the format requested above]
-{RESPONSE_CLOSE}
-
-Both sections must be non-empty. Do not output anything outside these tags."""
-
 
 @dataclass(frozen=True)
 class SftOutput:
@@ -75,22 +66,52 @@ def parse_task_output(text: Optional[str], parser: Callable[[str], object]):
     }
 
 
-def add_output_instruction(prompt: str) -> str:
-    prompt = _require_content(prompt, "prompt")
-    return f"{prompt.rstrip()}\n\n{OUTPUT_INSTRUCTION}"
+def build_sft_direct_prompt(
+    source_lang: str, target_lang: str, source_text: str
+) -> str:
+    source_lang = LANG_MAP.get(source_lang, source_lang)
+    target_lang = LANG_MAP.get(target_lang, target_lang)
+    return f"""Translate this text from {source_lang} to {target_lang} faithfully and naturally.
+
+Source:
+{source_text}"""
+
+
+def build_sft_gpe_prompt(
+    source_lang: str,
+    target_lang: str,
+    source_text: str,
+    candidates: list[str],
+) -> str:
+    source_lang = LANG_MAP.get(source_lang, source_lang)
+    target_lang = LANG_MAP.get(target_lang, target_lang)
+    rendered = "\n\n".join(
+        f"Candidate {candidate_identifiers[index]}:\n{candidate}"
+        for index, candidate in enumerate(candidates)
+    )
+    return f"""Produce the best {target_lang} translation of the {source_lang} source using the candidates. Correct errors and combine candidates only when useful.
+
+Source:
+{source_text}
+
+{rendered}"""
+
+
+def build_scd_stage1_prompt(
+    source_lang: str, target_lang: str, source_text: str
+) -> str:
+    source_lang = LANG_MAP.get(source_lang, source_lang)
+    target_lang = LANG_MAP.get(target_lang, target_lang)
+    return f"""Analyze this {source_lang} source into meaningful translation segments. For each segment, explore several plausible {target_lang} translations with different interpretations or wording. Do not produce the complete translation yet.
+
+Source:
+{source_text}"""
 
 
 def build_scd_followup_prompt(source_lang: str, target_lang: str) -> str:
-    return add_output_instruction(
-        f"""Now perform the convergent stage of the translation from {source_lang} to {target_lang}.
-
-Use the complete source in the first user message and the segment analysis and candidates in your previous response. Treat those candidates as exploratory evidence, not as authority. Reject or repair any candidate that conflicts with the source, then select, edit, or combine the strongest choices into one faithful and coherent complete translation.
-
-Perform a mandatory whole-text polish pass for idiomatic phrasing, sentence structure, cohesion, punctuation, and consistent register. Recheck that polishing has not changed facts, entities, numbers, negation, logical relationships, emphasis, tone, or formatting.
-
-Inside the response section, output only the final translation between the exact tags below, with no other text:
-<final_translation>...</final_translation>"""
-    )
+    source_lang = LANG_MAP.get(source_lang, source_lang)
+    target_lang = LANG_MAP.get(target_lang, target_lang)
+    return f"""Using the source and segment candidates above, produce one faithful {target_lang} translation from {source_lang}. Resolve cross-segment dependencies, reject errors, and polish the complete translation for naturalness and consistency."""
 
 
 def _require_content(value, name: str) -> str:

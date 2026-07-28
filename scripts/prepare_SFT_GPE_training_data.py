@@ -6,7 +6,8 @@ import pandas as pd
 from inference.run_oss_diverse_mt import extract_final_translation
 from inference.run_oss_group_post_edit import extract_response as extract_gpe
 from inference.sft_mt_protocol import (
-    add_output_instruction,
+    build_sft_direct_prompt,
+    build_sft_gpe_prompt,
     format_sft_output,
     parse_task_output,
 )
@@ -55,9 +56,9 @@ def main(
 
     frame = pd.read_parquet(data_path)
     required = {
-        "src_text", "src_lang", "trg_lang", "gpe_stage1_prompts",
+        "src_text", "src_lang", "trg_lang",
         "gpe_stage1_thinking", "gpe_stage1_responses",
-        "gpe_stage1_translations", "gpe_stage2_prompt",
+        "gpe_stage1_translations",
         "gpe_stage2_thinking", "gpe_stage2_response", "gpe_translation",
         "gpe_parser_valid",
     }
@@ -76,14 +77,17 @@ def main(
         if not bool(row["gpe_parser_valid"]):
             raise ValueError(f"Input row {source_index} is not parser-valid")
         direct_values = list(zip(
-            row["gpe_stage1_prompts"], row["gpe_stage1_thinking"],
-            row["gpe_stage1_responses"], row["gpe_stage1_translations"],
+            row["gpe_stage1_thinking"], row["gpe_stage1_responses"],
+            row["gpe_stage1_translations"],
         ))
         if len(direct_values) != 4:
             raise ValueError(
                 f"Input row {source_index} has {len(direct_values)} direct candidates; expected 4"
             )
-        for candidate_index, (prompt, thinking, response, translation) in enumerate(direct_values):
+        direct_prompt = build_sft_direct_prompt(
+            row["src_lang"], row["trg_lang"], row["src_text"]
+        )
+        for candidate_index, (thinking, response, translation) in enumerate(direct_values):
             assistant = format_sft_output(thinking, response)
             parsed = parse_task_output(assistant, extract_final_translation)
             if parsed is None or parsed["parsed"] != translation:
@@ -91,7 +95,7 @@ def main(
                     f"Direct response failed round-trip validation at row {source_index}, candidate {candidate_index}"
                 )
             messages = [
-                {"role": "user", "content": add_output_instruction(prompt)},
+                {"role": "user", "content": direct_prompt},
                 {"role": "assistant", "content": assistant},
             ]
             length = _sequence_length(tokenizer, messages)
@@ -117,7 +121,10 @@ def main(
                 f"GPE response failed round-trip validation at row {source_index}"
             )
         messages = [
-            {"role": "user", "content": add_output_instruction(row["gpe_stage2_prompt"])},
+            {"role": "user", "content": build_sft_gpe_prompt(
+                row["src_lang"], row["trg_lang"], row["src_text"],
+                list(row["gpe_stage1_translations"]),
+            )},
             {"role": "assistant", "content": assistant},
         ]
         length = _sequence_length(tokenizer, messages)

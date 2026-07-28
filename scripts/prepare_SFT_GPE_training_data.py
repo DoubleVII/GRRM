@@ -21,9 +21,30 @@ def _sequence_length(tokenizer, messages: list[dict]) -> int:
     ))
 
 
+def _output_paths(
+    output_path: str,
+    direct_output_path: str | None,
+    post_edit_output_path: str | None,
+) -> tuple[Path, Path]:
+    base = Path(output_path)
+    if base.suffix == ".parquet":
+        base = base.with_suffix("")
+    direct = Path(direct_output_path) if direct_output_path else Path(
+        f"{base}.direct_mt.parquet"
+    )
+    post_edit = Path(post_edit_output_path) if post_edit_output_path else Path(
+        f"{base}.group_post_edit.parquet"
+    )
+    if direct == post_edit:
+        raise ValueError("direct and group-post-edit output paths must differ")
+    return direct, post_edit
+
+
 def main(
     data_path: str,
     output_path: str,
+    direct_output_path: str = None,
+    post_edit_output_path: str = None,
     tokenizer_path: str = "/home/nfs06/yangs/LLM/Qwen/Qwen3-8B",
     max_length: int = 32768,
     max_samples: int = 0,
@@ -48,7 +69,8 @@ def main(
     frame = frame.reset_index(drop=True)
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
 
-    records = []
+    direct_records = []
+    post_edit_records = []
     too_long = {"direct_mt": 0, "group_post_edit": 0}
     for source_index, row in frame.iterrows():
         if not bool(row["gpe_parser_valid"]):
@@ -76,7 +98,7 @@ def main(
             if length > max_length:
                 too_long["direct_mt"] += 1
                 continue
-            records.append({
+            direct_records.append({
                 "messages": messages,
                 "task": "direct_mt",
                 "source_index": source_index,
@@ -102,7 +124,7 @@ def main(
         if length > max_length:
             too_long["group_post_edit"] += 1
         else:
-            records.append({
+            post_edit_records.append({
                 "messages": messages,
                 "task": "group_post_edit",
                 "source_index": source_index,
@@ -112,12 +134,28 @@ def main(
                 "sequence_length": length,
             })
 
-    output = pd.DataFrame(records).sample(frac=1.0, random_state=seed).reset_index(drop=True)
-    destination = Path(output_path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    output.to_parquet(destination, index=False)
-    counts = output["task"].value_counts().to_dict()
-    print(f"Saved {len(output)} rows to {destination}: {counts}; filtered too long: {too_long}")
+    direct_output = pd.DataFrame(direct_records).sample(
+        frac=1.0, random_state=seed
+    ).reset_index(drop=True)
+    post_edit_output = pd.DataFrame(post_edit_records).sample(
+        frac=1.0, random_state=seed
+    ).reset_index(drop=True)
+    direct_destination, post_edit_destination = _output_paths(
+        output_path, direct_output_path, post_edit_output_path
+    )
+    direct_destination.parent.mkdir(parents=True, exist_ok=True)
+    post_edit_destination.parent.mkdir(parents=True, exist_ok=True)
+    direct_output.to_parquet(direct_destination, index=False)
+    post_edit_output.to_parquet(post_edit_destination, index=False)
+    print(
+        f"Saved {len(direct_output)} direct_mt rows to {direct_destination}; "
+        f"filtered too long: {too_long['direct_mt']}"
+    )
+    print(
+        f"Saved {len(post_edit_output)} group_post_edit rows to "
+        f"{post_edit_destination}; filtered too long: "
+        f"{too_long['group_post_edit']}"
+    )
 
 
 if __name__ == "__main__":

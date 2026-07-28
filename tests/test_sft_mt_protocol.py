@@ -1,5 +1,6 @@
 import unittest
 
+from scripts.prepare_SFT_GPE_training_data import _output_paths
 from inference.run_oss_diverse_mt import extract_final_translation
 from inference.sft_mt_protocol import (
     add_output_instruction,
@@ -11,6 +12,22 @@ from inference.sft_mt_protocol import (
 
 
 class SftMtProtocolTest(unittest.TestCase):
+    def test_gpe_output_paths_are_split_by_default(self):
+        direct, post_edit = _output_paths("/tmp/train.parquet", None, None)
+        self.assertEqual(str(direct), "/tmp/train.direct_mt.parquet")
+        self.assertEqual(
+            str(post_edit), "/tmp/train.group_post_edit.parquet"
+        )
+
+    def test_gpe_output_paths_can_be_overridden(self):
+        direct, post_edit = _output_paths(
+            "/tmp/unused.parquet", "/tmp/direct.parquet", "/tmp/gpe.parquet"
+        )
+        self.assertEqual(str(direct), "/tmp/direct.parquet")
+        self.assertEqual(str(post_edit), "/tmp/gpe.parquet")
+        with self.assertRaises(ValueError):
+            _output_paths("/tmp/x", "/tmp/same", "/tmp/same")
+
     def test_round_trip_and_inner_parser(self):
         text = format_sft_output(
             "Check fidelity.",

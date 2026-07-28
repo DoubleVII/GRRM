@@ -20,14 +20,19 @@ parser. Invalid output is retried and never passed to the evaluator.
 ```bash
 .venv/bin/python -m scripts.prepare_SFT_GPE_training_data \
   --data_path /home/nfs06/yangs/data/parquet_data/mt_distill_data/tower_zhen.oss.gpe.parquet \
-  --output_path /home/nfs06/yangs/data/parquet_data/mt_distill_data/tower_zhen.oss.gpe.sft.parquet
+  --output_path /home/nfs06/yangs/data/parquet_data/training_data/tower_zhen.oss.gpe.sft.parquet
 
 .venv/bin/python -m scripts.prepare_SFT_SCD_training_data \
   --data_path /home/nfs06/yangs/data/parquet_data/mt_distill_data/tower_zhen.oss.scd.parquet \
-  --output_path /home/nfs06/yangs/data/parquet_data/mt_distill_data/tower_zhen.oss.scd.sft.parquet
+  --output_path /home/nfs06/yangs/data/parquet_data/training_data/tower_zhen.oss.scd.sft.parquet
 ```
 
 GPE produces four direct-MT examples and one group-post-edit example per source.
+The command above writes them separately as
+`tower_zhen.oss.gpe.sft.direct_mt.parquet` and
+`tower_zhen.oss.gpe.sft.group_post_edit.parquet`, so their training mixture can
+be configured independently. Use `--direct_output_path` and
+`--post_edit_output_path` to override either derived path.
 SCD produces one four-message conversation per source.
 
 ## Inference only

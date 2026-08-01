@@ -12,7 +12,15 @@ DATA_IDS="${DATA_IDS:-seedx_challenge_zhen,seedx_challenge_enzh,wmt23_zh_en,wmt2
 MAX_SAMPLES="${MAX_SAMPLES:-0}"
 RUNS="${RUNS:-4}"
 SAMPLING_N="${SAMPLING_N:-4}"
-OUTPUT_PATH="${OUTPUT_PATH:-results/qwen_sft_mt_eval.${MODEL_LABEL}.${METHOD}.json}"
+MAX_CANDIDATES="${MAX_CANDIDATES:-4}"
+PROMPT_TYPE="${PROMPT_TYPE:-fixed_4}"
+EXTRA_ARGS=()
+if [[ "${METHOD}" == "flash_gpe" ]]; then
+  OUTPUT_PATH="${OUTPUT_PATH:-results/qwen_sft_mt_eval.${MODEL_LABEL}.${METHOD}.${PROMPT_TYPE}.max${MAX_CANDIDATES}.json}"
+  EXTRA_ARGS+=(--max_candidates "${MAX_CANDIDATES}" --prompt_type "${PROMPT_TYPE}")
+else
+  OUTPUT_PATH="${OUTPUT_PATH:-results/qwen_sft_mt_eval.${MODEL_LABEL}.${METHOD}.json}"
+fi
 
 .venv/bin/python -m eval.run_qwen_sft_mt_eval \
   --method "${METHOD}" \
@@ -26,4 +34,5 @@ OUTPUT_PATH="${OUTPUT_PATH:-results/qwen_sft_mt_eval.${MODEL_LABEL}.${METHOD}.js
   --runs "${RUNS}" \
   --gpu_memory_utilization 0.9 \
   --evaluator_gpu_memory_utilization 0.9 \
-  --max_model_len 32768
+  --max_model_len 32768 \
+  "${EXTRA_ARGS[@]}"

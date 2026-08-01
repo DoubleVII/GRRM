@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Callable, Optional, Union
 
 from inference.run_mt import _block_extractor
+from inference.oss_flash_gpe_prompts import validate_prompt_type
+from inference.run_oss_flash_gpe_mt import extract_candidate_response
 from inference.run_oss_diverse_mt import (
     extract_final_translation,
     extract_json_object,
@@ -13,6 +15,8 @@ from inference.sft_mt_protocol import (
     build_scd_followup_prompt,
     build_scd_stage1_prompt,
     build_sft_direct_prompt,
+    build_sft_flash_gpe_candidate_prompt,
+    build_sft_flash_gpe_post_edit_prompt,
     build_sft_gpe_prompt,
     parse_task_output,
 )
@@ -169,6 +173,42 @@ def run_direct_stage(
     return {"outputs": outputs, "messages": messages}
 
 
+def run_flash_gpe_candidate_stage(
+    src_list: list[str],
+    src_langs: Union[str, list[str]],
+    trg_langs: Union[str, list[str]],
+    *,
+    engine: SftMtEngine,
+    max_candidates: int = 4,
+    prompt_type: str = "fixed_4",
+    temperature: float = 0.8,
+    top_p: float = 0.95,
+    max_tokens: int = 4096,
+    retry: int = 3,
+) -> dict:
+    validate_prompt_type(prompt_type, max_candidates)
+    src_langs, trg_langs = _normalize_languages(len(src_list), src_langs, trg_langs)
+    exact_count = prompt_type == "fixed_4"
+    messages = [[{
+        "role": "user",
+        "content": build_sft_flash_gpe_candidate_prompt(
+            sl, tl, source, max_candidates, exact_count=exact_count
+        ),
+    }] for source, sl, tl in zip(src_list, src_langs, trg_langs)]
+    outputs = generate_validated(
+        engine,
+        messages,
+        lambda text: extract_candidate_response(
+            text, max_candidates, exact_count=exact_count
+        ),
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        retry=retry,
+    )
+    return {"outputs": outputs, "messages": messages}
+
+
 def run_scd_pipeline(
     src_list: list[str],
     src_langs: list[str],
@@ -256,8 +296,12 @@ def run_gpe_pipeline(
         max_tokens=sampling_max_tokens,
         retry=retry,
     )
+    candidates = [
+        [value["parsed"] for value in values]
+        for values in sampling["outputs"]
+    ]
     valid_indices = [
-        index for index, values in enumerate(sampling["outputs"]) if len(values) >= 2
+        index for index, values in enumerate(candidates) if len(values) >= 2
     ]
     post_edit_messages = [[{
         "role": "user",
@@ -265,7 +309,7 @@ def run_gpe_pipeline(
             src_langs[index],
             trg_langs[index],
             src_list[index],
-            [value["parsed"] for value in sampling["outputs"][index]],
+            candidates[index],
         ),
     }] for index in valid_indices]
     post_edit_local = generate_validated(
@@ -284,6 +328,77 @@ def run_gpe_pipeline(
         messages_by_index[index] = messages
     return {
         "sampling": sampling,
+        "candidates": candidates,
+        "usable_candidate_counts": [len(values) for values in candidates],
+        "post_edit": post_edit,
+        "post_edit_messages": messages_by_index,
+    }
+
+
+def run_flash_gpe_pipeline(
+    src_list: list[str],
+    src_langs: list[str],
+    trg_langs: list[str],
+    *,
+    engine: SftMtEngine,
+    max_candidates: int = 4,
+    prompt_type: str = "fixed_4",
+    candidate_temperature: float = 0.8,
+    candidate_top_p: float = 0.95,
+    candidate_max_tokens: int = 4096,
+    post_edit_temperature: float = 0.3,
+    post_edit_top_p: float = 0.8,
+    post_edit_max_tokens: int = 4096,
+    retry: int = 3,
+) -> dict:
+    candidate_generation = run_flash_gpe_candidate_stage(
+        src_list,
+        src_langs,
+        trg_langs,
+        engine=engine,
+        max_candidates=max_candidates,
+        prompt_type=prompt_type,
+        temperature=candidate_temperature,
+        top_p=candidate_top_p,
+        max_tokens=candidate_max_tokens,
+        retry=retry,
+    )
+    candidates = [
+        values[0]["parsed"] if values else []
+        for values in candidate_generation["outputs"]
+    ]
+    valid_indices = [
+        index for index, values in enumerate(candidates) if len(values) >= 2
+    ]
+    post_edit_messages = [[{
+        "role": "user",
+        "content": build_sft_flash_gpe_post_edit_prompt(
+            src_langs[index],
+            trg_langs[index],
+            src_list[index],
+            candidates[index],
+        ),
+    }] for index in valid_indices]
+    post_edit_local = generate_validated(
+        engine,
+        post_edit_messages,
+        _block_extractor,
+        temperature=post_edit_temperature,
+        top_p=post_edit_top_p,
+        max_tokens=post_edit_max_tokens,
+        retry=retry,
+    ) if post_edit_messages else []
+    post_edit = [[] for _ in src_list]
+    messages_by_index = [None for _ in src_list]
+    for index, values, messages in zip(
+        valid_indices, post_edit_local, post_edit_messages
+    ):
+        post_edit[index] = values
+        messages_by_index[index] = messages
+    return {
+        "candidate_generation": candidate_generation,
+        "candidates": candidates,
+        "usable_candidate_counts": [len(values) for values in candidates],
         "post_edit": post_edit,
         "post_edit_messages": messages_by_index,
     }
@@ -300,6 +415,8 @@ def main(
     model_path: str,
     max_samples: int = 0,
     sampling_n: int = 4,
+    max_candidates: int = 4,
+    prompt_type: str = "fixed_4",
     retry: int = 3,
     gpu_memory_utilization: float = 0.9,
     max_model_len: int = 32768,
@@ -308,8 +425,11 @@ def main(
     import pandas as pd
 
     method = method.strip().lower()
-    if method not in {"direct", "group_post_edit", "scd"}:
-        raise ValueError("method must be one of: direct, group_post_edit, scd")
+    methods = {"direct", "group_post_edit", "flash_gpe", "scd"}
+    if method not in methods:
+        raise ValueError(
+            "method must be one of: direct, group_post_edit, flash_gpe, scd"
+        )
     frame = pd.read_parquet(input_path)
     required = {"src_text", "src_lang", "trg_lang"}
     missing = sorted(required - set(frame.columns))
@@ -341,6 +461,17 @@ def main(
             retry=retry,
         )
         final_outputs = pipeline["post_edit"]
+    elif method == "flash_gpe":
+        pipeline = run_flash_gpe_pipeline(
+            sources,
+            src_langs,
+            trg_langs,
+            engine=engine,
+            max_candidates=max_candidates,
+            prompt_type=prompt_type,
+            retry=retry,
+        )
+        final_outputs = pipeline["post_edit"]
     else:
         pipeline = run_scd_pipeline(
             sources, src_langs, trg_langs, engine=engine, retry=retry
@@ -363,7 +494,20 @@ def main(
             item["direct"] = final_outputs[index][0] if final_outputs[index] else None
         elif method == "group_post_edit":
             item["direct_candidates"] = pipeline["sampling"]["outputs"][index]
+            item["candidates"] = pipeline["candidates"][index]
+            item["usable_candidate_count"] = pipeline["usable_candidate_counts"][index]
             item["post_edit"] = final_outputs[index][0] if final_outputs[index] else None
+        elif method == "flash_gpe":
+            item["candidate_generation"] = pipeline["candidate_generation"][
+                "outputs"
+            ][index]
+            item["candidates"] = pipeline["candidates"][index]
+            item["usable_candidate_count"] = pipeline[
+                "usable_candidate_counts"
+            ][index]
+            item["flash_gpe"] = (
+                final_outputs[index][0] if final_outputs[index] else None
+            )
         else:
             item["stage1"] = pipeline["stage1"][index][0] if pipeline["stage1"][index] else None
             item["stage2"] = final_outputs[index][0] if final_outputs[index] else None
@@ -372,6 +516,8 @@ def main(
         "method": method,
         "model_path": model_path,
         "input_path": input_path,
+        "max_candidates": max_candidates if method == "flash_gpe" else None,
+        "prompt_type": prompt_type if method == "flash_gpe" else None,
         "generation_failures": sum(not values for values in final_outputs),
         "items": items,
     }

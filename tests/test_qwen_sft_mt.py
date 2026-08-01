@@ -1,8 +1,11 @@
+import json
 import unittest
 
 from inference.run_qwen_sft_mt import (
     SftMtEngine,
     generate_validated,
+    run_flash_gpe_pipeline,
+    run_gpe_pipeline,
     run_scd_pipeline,
 )
 from inference.sft_mt_protocol import format_sft_output
@@ -27,14 +30,76 @@ class _RequestOutput:
 class _Model:
     def __init__(self, batches):
         self.batches = list(batches)
+        self.calls = []
+        self.params = []
 
     def generate(self, prompts, params):
+        self.calls.append(prompts)
+        self.params.append(params)
         values = self.batches.pop(0)
         self.last_prompts = prompts
         return [_RequestOutput(item) for item in values]
 
 
 class QwenSftMtTest(unittest.TestCase):
+    def test_flash_gpe_generates_four_candidates_in_two_calls(self):
+        candidates = ["你好", "您好", "嗨", "你好呀"]
+        stage1_raw = format_sft_output(
+            "Create diverse translations.",
+            json.dumps({"translations": candidates}, ensure_ascii=False),
+        )
+        stage2_raw = format_sft_output(
+            "Select the best rendering.",
+            "```translation\n您好\n```",
+        )
+        model = _Model([[[stage1_raw]], [[stage2_raw]]])
+        engine = SftMtEngine(model=model, tokenizer=_Tokenizer())
+
+        result = run_flash_gpe_pipeline(
+            ["Hello"],
+            ["en"],
+            ["zh"],
+            engine=engine,
+            prompt_type="fixed_4",
+            max_candidates=4,
+            retry=0,
+        )
+
+        self.assertEqual(len(model.calls), 2)
+        self.assertEqual(result["candidates"], [candidates])
+        self.assertEqual(result["usable_candidate_counts"], [4])
+        self.assertEqual(result["post_edit"][0][0]["parsed"], "您好")
+        prompts = [
+            result["candidate_generation"]["messages"][0][0]["content"],
+            result["post_edit_messages"][0][0]["content"],
+        ]
+        for prompt in prompts:
+            self.assertNotIn("JSON", prompt)
+            self.assertNotIn("schema", prompt)
+            self.assertNotIn("<thinking>", prompt)
+            self.assertNotIn("<response>", prompt)
+
+    def test_original_gpe_samples_four_independent_completions(self):
+        candidate_raw = [
+            format_sft_output(
+                f"Reason {index}.",
+                f"<final_translation>candidate-{index}</final_translation>",
+            )
+            for index in range(4)
+        ]
+        final_raw = format_sft_output(
+            "Choose the best.", "```translation\ncandidate-1\n```"
+        )
+        model = _Model([[candidate_raw], [[final_raw]]])
+        engine = SftMtEngine(model=model, tokenizer=_Tokenizer())
+        result = run_gpe_pipeline(
+            ["Hello"], ["en"], ["zh"], engine=engine, sampling_n=4, retry=0
+        )
+        self.assertEqual(model.params[0].n, 4)
+        self.assertEqual(model.params[1].n, 1)
+        self.assertEqual(result["usable_candidate_counts"], [4])
+        self.assertEqual(result["post_edit"][0][0]["parsed"], "candidate-1")
+
     def test_invalid_outer_protocol_retries(self):
         model = _Model([
             [["invalid"]],

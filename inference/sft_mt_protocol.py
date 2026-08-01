@@ -77,6 +77,28 @@ Source:
 {source_text}"""
 
 
+def build_sft_flash_gpe_candidate_prompt(
+    source_lang: str,
+    target_lang: str,
+    source_text: str,
+    max_candidates: int = 4,
+    *,
+    exact_count: bool = True,
+) -> str:
+    if max_candidates < 2:
+        raise ValueError("max_candidates must be at least 2")
+    source_lang = LANG_MAP.get(source_lang, source_lang)
+    target_lang = LANG_MAP.get(target_lang, target_lang)
+    if exact_count:
+        count = f"exactly {max_candidates}"
+    else:
+        count = f"as many as useful, up to {max_candidates}"
+    return f"""Translate this text from {source_lang} to {target_lang} and produce {count} meaningfully different complete translations. Keep every translation faithful and natural.
+
+Source:
+{source_text}"""
+
+
 def build_sft_gpe_prompt(
     source_lang: str,
     target_lang: str,
@@ -87,6 +109,26 @@ def build_sft_gpe_prompt(
     target_lang = LANG_MAP.get(target_lang, target_lang)
     rendered = "\n\n".join(
         f"Candidate {candidate_identifiers[index]}:\n{candidate}"
+        for index, candidate in enumerate(candidates)
+    )
+    return f"""Produce the best {target_lang} translation of the {source_lang} source using the candidates. Correct errors and combine candidates only when useful.
+
+Source:
+{source_text}
+
+{rendered}"""
+
+
+def build_sft_flash_gpe_post_edit_prompt(
+    source_lang: str,
+    target_lang: str,
+    source_text: str,
+    candidates: list[str],
+) -> str:
+    source_lang = LANG_MAP.get(source_lang, source_lang)
+    target_lang = LANG_MAP.get(target_lang, target_lang)
+    rendered = "\n\n".join(
+        f"Candidate {index + 1}:\n{candidate}"
         for index, candidate in enumerate(candidates)
     )
     return f"""Produce the best {target_lang} translation of the {source_lang} source using the candidates. Correct errors and combine candidates only when useful.

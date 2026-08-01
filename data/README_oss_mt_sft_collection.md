@@ -41,15 +41,33 @@ CUDA_VISIBLE_DEVICES=0,3 .venv/bin/python -m data.run_oss_gpe_sft_data \
   --sampling_n 4
 ```
 
-Stage 1 contains `sampling_n` independent ordinary direct-translation
-completions. Stage 2 receives those complete translations and performs group
-post-editing with the same prompt used by the OSS GPE evaluation pipeline. The
-columns are:
+Stage 1 contains `sampling_n` independent direct-translation completions.
+FlashGPE is a separate collection method:
 
-- `gpe_stage1_prompts`, `gpe_stage1_thinking`, `gpe_stage1_responses`,
-  `gpe_stage1_translations`
-- `gpe_stage2_prompt`, `gpe_stage2_thinking`, `gpe_stage2_response`,
-  `gpe_translation`
+```bash
+CUDA_VISIBLE_DEVICES=0,1 .venv/bin/python -m data.run_oss_flash_gpe_sft_data \
+  --data_path INPUT.parquet \
+  --output_path OUTPUT.flash_gpe.fixed_4.parquet \
+  --model_path /home/zfs01/yangs/LLM/openai/gpt-oss-120b \
+  --prompt_type fixed_4 \
+  --max_candidates 4
+```
+
+FlashGPE Stage 1 stores one prompt, thinking trace, and JSON response whose
+parsed `translations` array contains the candidates. Stage 2 receives those
+translations and performs post-editing. Its columns are:
+
+- `flash_gpe_stage1_prompt`, `flash_gpe_stage1_thinking`,
+  `flash_gpe_stage1_response`, `flash_gpe_candidates`
+- `flash_gpe_stage2_prompt`, `flash_gpe_stage2_thinking`,
+  `flash_gpe_stage2_response`, `flash_gpe_translation`
+- `flash_gpe_prompt_type`, `flash_gpe_max_candidates`,
+  `flash_gpe_candidate_count`, `flash_gpe_parser_valid`
+
+The FlashGPE SFT preparation script writes `flash_gpe_candidates` and
+`flash_gpe` datasets. It also accepts legacy rows marked with
+`gpe_candidate_generation=single_call`; independent GPE rows remain owned by
+`prepare_SFT_GPE_training_data.py`.
 
 Both scripts preserve all columns from the input rows. Required input columns
 default to `src_text`, `src_lang`, and `trg_lang`; their names are configurable.

@@ -1,12 +1,18 @@
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from scripts.prepare_SFT_GPE_training_data import _output_paths
+import pandas as pd
+
+from scripts.prepare_SFT_GPE_training_data import _output_paths, main as prepare_gpe
 from inference.run_oss_diverse_mt import extract_final_translation
 from inference.sft_mt_protocol import (
     build_scd_followup_prompt,
     build_scd_stage1_prompt,
     build_sft_direct_prompt,
     build_sft_gpe_prompt,
+    build_sft_flash_gpe_candidate_prompt,
     format_sft_output,
     parse_sft_output,
     parse_task_output,
@@ -14,6 +20,53 @@ from inference.sft_mt_protocol import (
 
 
 class SftMtProtocolTest(unittest.TestCase):
+    @patch("transformers.AutoTokenizer.from_pretrained")
+    def test_legacy_row_without_mode_metadata_remains_independent(
+        self, from_pretrained
+    ):
+        class Tokenizer:
+            @staticmethod
+            def apply_chat_template(*args, **kwargs):
+                return [0] * 32
+
+        from_pretrained.return_value = Tokenizer()
+        candidates = ["你好", "您好", "嗨", "你好呀"]
+        responses = [
+            f"<final_translation>{candidate}</final_translation>"
+            for candidate in candidates
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "legacy.parquet"
+            output_base = Path(temp_dir) / "train.parquet"
+            pd.DataFrame({
+                "src_text": ["Hello"],
+                "src_lang": ["en"],
+                "trg_lang": ["zh"],
+                "gpe_stage1_thinking": [["Think"] * 4],
+                "gpe_stage1_responses": [responses],
+                "gpe_stage1_translations": [candidates],
+                "gpe_stage2_thinking": ["Choose the formal candidate."],
+                "gpe_stage2_response": ["```translation\n您好\n```"],
+                "gpe_translation": ["您好"],
+                "gpe_parser_valid": [True],
+            }).to_parquet(input_path, index=False)
+
+            prepare_gpe(
+                str(input_path),
+                str(output_base),
+                tokenizer_path="unused",
+            )
+            stage1 = pd.read_parquet(
+                Path(temp_dir) / "train.direct_mt.parquet"
+            )
+            post_edit = pd.read_parquet(
+                Path(temp_dir) / "train.group_post_edit.parquet"
+            )
+
+        self.assertEqual(len(stage1), 4)
+        self.assertEqual(set(stage1["task"]), {"direct_mt"})
+        self.assertEqual(len(post_edit), 1)
+
     def test_gpe_output_paths_are_split_by_default(self):
         direct, post_edit = _output_paths("/tmp/train.parquet", None, None)
         self.assertEqual(str(direct), "/tmp/train.direct_mt.parquet")
@@ -67,6 +120,7 @@ class SftMtProtocolTest(unittest.TestCase):
     def test_training_prompts_are_short_and_omit_format_requirements(self):
         prompts = [
             build_sft_direct_prompt("en", "zh", "Hello"),
+            build_sft_flash_gpe_candidate_prompt("en", "zh", "Hello", 4),
             build_sft_gpe_prompt("en", "zh", "Hello", ["你好", "您好"]),
             build_scd_stage1_prompt("en", "zh", "Hello"),
             build_scd_followup_prompt("en", "zh"),

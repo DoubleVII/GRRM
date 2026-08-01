@@ -34,6 +34,7 @@ def prepare_vllm_inputs(
     trg_langs: list[str],
     encoding: HarmonyEncoding,
     reasoning_effort: str = None,
+    prompt_builder=get_oss_group_post_edit_prompt,
 ):
     inputs = []
     system_content = SystemContent.new()
@@ -49,7 +50,7 @@ def prepare_vllm_inputs(
     for src_text, mt_texts, notes, src_lang, trg_lang in zip(
         src_list, mt_list, notes_list, src_langs, trg_langs
     ):
-        prompt = get_oss_group_post_edit_prompt(src_lang, trg_lang, src_text, mt_texts, notes)
+        prompt = prompt_builder(src_lang, trg_lang, src_text, mt_texts, notes)
         convo = Conversation.from_messages([
             Message.from_role_and_content(Role.SYSTEM, system_content),
             Message.from_role_and_content(Role.USER, prompt),
@@ -113,6 +114,7 @@ def func_call(
     model_path: str = "gpt-oss-20b",
     reasoning_effort: str = None,
     max_new_tokens: int = 8192,
+    prompt_builder=get_oss_group_post_edit_prompt,
 ):
     from vllm import SamplingParams
 
@@ -140,7 +142,16 @@ def func_call(
         stop_token_ids=stop_token_ids,
     )
 
-    vllm_inputs = prepare_vllm_inputs(src_list, mt_list, notes_list, src_langs, trg_langs, encoding, reasoning_effort)
+    vllm_inputs = prepare_vllm_inputs(
+        src_list,
+        mt_list,
+        notes_list,
+        src_langs,
+        trg_langs,
+        encoding,
+        reasoning_effort,
+        prompt_builder,
+    )
     indices = list(range(n))
     eval_out = [None] * n
     batch_results = run_generate(llm, vllm_inputs, sampling_params, encoding)

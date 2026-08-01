@@ -1,3 +1,4 @@
+import inspect
 import json
 import tempfile
 import unittest
@@ -8,6 +9,7 @@ import pandas as pd
 
 from eval.run_oss_group_post_edit_mt_eval import main as run_eval
 from inference.run_oss_group_post_edit_mt import (
+    main as run_inference,
     run_direct_sampling_stage,
     run_pipeline,
     validate_sampling_n,
@@ -15,6 +17,13 @@ from inference.run_oss_group_post_edit_mt import (
 
 
 class OssGroupPostEditMtTest(unittest.TestCase):
+    def test_public_api_only_accepts_independent_sampling_parameters(self):
+        parameters = inspect.signature(run_inference).parameters
+        self.assertIn("sampling_n", parameters)
+        self.assertNotIn("candidate_generation", parameters)
+        self.assertNotIn("max_candidates", parameters)
+        self.assertNotIn("prompt_type", parameters)
+
     def test_sampling_n_must_fit_prompt_candidate_labels(self):
         for invalid in (0, 1, 9):
             with self.subTest(invalid=invalid):
@@ -181,6 +190,10 @@ class OssGroupPostEditMtTest(unittest.TestCase):
             payload["summary"]["overall"]["candidate_generation_failures"], 0
         )
         self.assertEqual(payload["settings"]["sampling_n"], 2)
+        self.assertEqual(
+            payload["summary"]["overall"]["candidate_count_distribution"],
+            {"2": 1},
+        )
         self.assertEqual(payload["items"][0]["mt_candidates"], ["你好", "您好"])
         self.assertEqual(
             payload["items"][0]["group_post_edit_scores"], [87.0, 89.0]

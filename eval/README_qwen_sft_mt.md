@@ -28,6 +28,10 @@ rubrics; the supervised responses teach the protocol and task preferences.
   --data_path /home/nfs06/yangs/data/parquet_data/mt_distill_data/tower_zhen.oss.flash_gpe.fixed_4.parquet \
   --output_path /home/nfs06/yangs/data/parquet_data/training_data/tower_zhen.oss.flash_gpe.sft.parquet
 
+.venv/bin/python -m scripts.prepare_SFT_fused_flash_gpe_training_data \
+  --data_path /home/nfs06/yangs/data/parquet_data/mt_distill_data/tower_zhen.oss.flash_gpe.fixed_4.parquet \
+  --output_path /home/nfs06/yangs/data/parquet_data/training_data/tower_zhen.oss.fused_flash_gpe.sft.parquet
+
 .venv/bin/python -m scripts.prepare_SFT_SCD_training_data \
   --data_path /home/nfs06/yangs/data/parquet_data/mt_distill_data/tower_zhen.oss.scd.parquet \
   --output_path /home/nfs06/yangs/data/parquet_data/training_data/tower_zhen.oss.scd.sft.parquet
@@ -35,14 +39,29 @@ rubrics; the supervised responses teach the protocol and task preferences.
 
 GPE produces four direct-MT examples and one group-post-edit example per
 source. FlashGPE separately produces one `flash_gpe_candidates` example and
-one `flash_gpe` example. Both preparation scripts rebuild concise SFT prompts
+one `flash_gpe` example. The preparation scripts rebuild concise SFT prompts
 and do not copy verbose OSS collection prompts.
+Fused FlashGPE combines the same two supervision stages into one
+`fused_flash_gpe` example and requires only one generation at inference time.
 The command above writes them separately as
 `tower_zhen.oss.gpe.sft.direct_mt.parquet` and
 `tower_zhen.oss.gpe.sft.group_post_edit.parquet`, so their training mixture can
 be configured independently. Use `--direct_output_path` and
 `--post_edit_output_path` to override either derived path.
 SCD produces one four-message conversation per source.
+
+## RL data
+
+Fused FlashGPE RL data contains only the combined user prompt and verl task
+metadata; it does not contain an assistant completion:
+
+```bash
+.venv/bin/python -m scripts.prepare_RL_fused_flash_gpe_training_data \
+  --data_path /home/nfs06/yangs/data/parquet_data/raw/towerx_v2_all.parquet \
+  --output_path /home/nfs06/yangs/data/parquet_data/training_data/towerx_v2_all.fused_flash_gpe.rl.parquet \
+  --prompt_type fixed_4 \
+  --max_candidates 4
+```
 
 ## Inference only
 
@@ -56,6 +75,8 @@ CUDA_VISIBLE_DEVICES=0,3 .venv/bin/python -m inference.run_qwen_sft_mt \
 
 For a FlashGPE checkpoint, use `--method flash_gpe`, `--prompt_type fixed_4`,
 and `--max_candidates 4`.
+For a Fused FlashGPE checkpoint, use `--method fused_flash_gpe` with the same
+prompt and candidate-count arguments.
 
 ## OSS evaluation
 
@@ -67,6 +88,8 @@ CUDA_VISIBLE_DEVICES=0,3 METHOD=scd MODEL_PATH=CHECKPOINT \
 FlashGPE evaluation uses `METHOD=flash_gpe`, `PROMPT_TYPE=fixed_4`, and
 `MAX_CANDIDATES=4`. Original GPE continues to use `METHOD=group_post_edit`
 and `SAMPLING_N=4`.
+Fused FlashGPE uses `METHOD=fused_flash_gpe`; its single generation defaults
+to `temperature=0.8`, `top_p=0.95`, and `max_tokens=8192`.
 
 To evaluate both trained methods sequentially:
 

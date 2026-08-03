@@ -1,0 +1,82 @@
+from pathlib import Path
+
+import fire
+import pandas as pd
+
+from inference.oss_flash_gpe_prompts import validate_prompt_type
+from inference.sft_mt_protocol import build_sft_fused_flash_gpe_prompt
+
+
+DATA_SOURCE = "TowerBlocks-MT-Fused-FlashGPE"
+ABILITY = "fused_flash_gpe"
+
+
+def main(
+    data_path: str,
+    output_path: str,
+    prompt_type: str = "fixed_4",
+    max_candidates: int = 4,
+    include_reference_info: bool = True,
+    max_samples: int = 0,
+    seed: int = 114514,
+):
+    """Build prompt-only Fused FlashGPE RL training data."""
+    validate_prompt_type(prompt_type, max_candidates)
+    frame = pd.read_parquet(data_path)
+    required = {"src_text", "src_lang", "trg_lang"}
+    if include_reference_info:
+        required.add("trg_text")
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+    if max_samples > 0:
+        frame = frame.head(max_samples)
+    frame = frame.reset_index(drop=True)
+
+    exact_count = prompt_type == "fixed_4"
+    records = []
+    for source_index, row in frame.iterrows():
+        extra_info = {
+            "source_index": source_index,
+            "src_lang": row["src_lang"],
+            "trg_lang": row["trg_lang"],
+            "src_text": row["src_text"],
+            "prompt_type": prompt_type,
+            "max_candidates": max_candidates,
+        }
+        if include_reference_info:
+            extra_info.update({
+                "ref_lang": row["trg_lang"],
+                "ref_text": row["trg_text"],
+            })
+        records.append({
+            "data_source": DATA_SOURCE,
+            "prompt": [{
+                "role": "user",
+                "content": build_sft_fused_flash_gpe_prompt(
+                    row["src_lang"],
+                    row["trg_lang"],
+                    row["src_text"],
+                    max_candidates,
+                    exact_count=exact_count,
+                ),
+            }],
+            "ability": ABILITY,
+            "reward_model": {"ground_truth": ""},
+            "extra_info": extra_info,
+        })
+
+    output = pd.DataFrame(records).sample(
+        frac=1.0, random_state=seed
+    ).reset_index(drop=True)
+    if not output.empty:
+        output["data_source"] = output["data_source"].astype("object")
+        output["ability"] = output["ability"].astype("object")
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    output.to_parquet(destination, index=False)
+    print(f"Saved {len(output)} fused_flash_gpe RL rows to {destination}")
+
+
+if __name__ == "__main__":
+    fire.Fire(main)

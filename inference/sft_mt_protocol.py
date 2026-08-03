@@ -16,8 +16,28 @@ class SftOutput:
     response: str
 
 
+@dataclass(frozen=True)
+class FusedSftOutput:
+    candidate_thinking: str
+    candidate_response: str
+    post_edit_thinking: str
+    post_edit_response: str
+
+
 _OUTPUT_PATTERN = re.compile(
     rf"\s*{re.escape(THINKING_OPEN)}\s*(.*?)\s*"
+    rf"{re.escape(THINKING_CLOSE)}\s*"
+    rf"{re.escape(RESPONSE_OPEN)}\s*(.*?)\s*"
+    rf"{re.escape(RESPONSE_CLOSE)}\s*",
+    re.DOTALL,
+)
+
+_FUSED_OUTPUT_PATTERN = re.compile(
+    rf"\s*{re.escape(THINKING_OPEN)}\s*(.*?)\s*"
+    rf"{re.escape(THINKING_CLOSE)}\s*"
+    rf"{re.escape(RESPONSE_OPEN)}\s*(.*?)\s*"
+    rf"{re.escape(RESPONSE_CLOSE)}\s*"
+    rf"{re.escape(THINKING_OPEN)}\s*(.*?)\s*"
     rf"{re.escape(THINKING_CLOSE)}\s*"
     rf"{re.escape(RESPONSE_OPEN)}\s*(.*?)\s*"
     rf"{re.escape(RESPONSE_CLOSE)}\s*",
@@ -66,6 +86,66 @@ def parse_task_output(text: Optional[str], parser: Callable[[str], object]):
     }
 
 
+def format_fused_sft_output(
+    candidate_thinking: str,
+    candidate_response: str,
+    post_edit_thinking: str,
+    post_edit_response: str,
+) -> str:
+    values = {
+        "candidate_thinking": candidate_thinking,
+        "candidate_response": candidate_response,
+        "post_edit_thinking": post_edit_thinking,
+        "post_edit_response": post_edit_response,
+    }
+    for name, value in values.items():
+        values[name] = _require_content(value, name)
+        _reject_protocol_tags(values[name], name)
+    return (
+        f"{THINKING_OPEN}\n{values['candidate_thinking']}\n{THINKING_CLOSE}\n"
+        f"{RESPONSE_OPEN}\n{values['candidate_response']}\n{RESPONSE_CLOSE}\n"
+        f"{THINKING_OPEN}\n{values['post_edit_thinking']}\n{THINKING_CLOSE}\n"
+        f"{RESPONSE_OPEN}\n{values['post_edit_response']}\n{RESPONSE_CLOSE}"
+    )
+
+
+def parse_fused_sft_output(text: Optional[str]) -> Optional[FusedSftOutput]:
+    if not isinstance(text, str):
+        return None
+    tags = (THINKING_OPEN, THINKING_CLOSE, RESPONSE_OPEN, RESPONSE_CLOSE)
+    if any(text.count(tag) != 2 for tag in tags):
+        return None
+    match = _FUSED_OUTPUT_PATTERN.fullmatch(text)
+    if match is None:
+        return None
+    values = tuple(value.strip() for value in match.groups())
+    if any(not value for value in values):
+        return None
+    return FusedSftOutput(*values)
+
+
+def parse_fused_task_output(
+    text: Optional[str],
+    candidate_parser: Callable[[str], object],
+    post_edit_parser: Callable[[str], object],
+):
+    envelope = parse_fused_sft_output(text)
+    if envelope is None:
+        return None
+    candidates = candidate_parser(envelope.candidate_response)
+    translation = post_edit_parser(envelope.post_edit_response)
+    if candidates is None or translation is None:
+        return None
+    return {
+        "candidate_thinking": envelope.candidate_thinking,
+        "candidate_response": envelope.candidate_response,
+        "candidates": candidates,
+        "post_edit_thinking": envelope.post_edit_thinking,
+        "post_edit_response": envelope.post_edit_response,
+        "parsed": translation,
+    }
+
+
 def build_sft_direct_prompt(
     source_lang: str, target_lang: str, source_text: str
 ) -> str:
@@ -94,6 +174,29 @@ def build_sft_flash_gpe_candidate_prompt(
     else:
         count = f"as many as useful, up to {max_candidates}"
     return f"""Translate this text from {source_lang} to {target_lang} and produce {count} meaningfully different complete translations. Keep every translation faithful and natural.
+
+Source:
+{source_text}"""
+
+
+def build_sft_fused_flash_gpe_prompt(
+    source_lang: str,
+    target_lang: str,
+    source_text: str,
+    max_candidates: int = 4,
+    *,
+    exact_count: bool = True,
+) -> str:
+    if max_candidates < 2:
+        raise ValueError("max_candidates must be at least 2")
+    source_lang = LANG_MAP.get(source_lang, source_lang)
+    target_lang = LANG_MAP.get(target_lang, target_lang)
+    count = (
+        f"exactly {max_candidates}"
+        if exact_count
+        else f"as many as useful, up to {max_candidates}"
+    )
+    return f"""Translate this text from {source_lang} to {target_lang}. First produce {count} meaningfully different complete translations, keeping each one faithful and natural. Then review those candidates, correct their errors, and produce the best final translation.
 
 Source:
 {source_text}"""

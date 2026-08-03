@@ -17,6 +17,7 @@ from inference.run_qwen_sft_mt import (
     init_sft_mt_model,
     run_direct_stage,
     run_flash_gpe_pipeline,
+    run_fused_flash_gpe_pipeline,
     run_gpe_pipeline,
     run_scd_pipeline,
 )
@@ -25,6 +26,7 @@ from inference.run_qwen_sft_mt import (
 SCORE_NAMES = {
     "direct": "direct_mean",
     "flash_gpe": "flash_gpe_mean",
+    "fused_flash_gpe": "fused_flash_gpe_mean",
     "group_post_edit": "group_post_edit_mean",
     "scd": "scd_mean",
 }
@@ -69,17 +71,20 @@ def main(
     method = method.strip().lower()
     if method not in SCORE_NAMES:
         raise ValueError(
-            "method must be one of: direct, group_post_edit, flash_gpe, scd"
+            "method must be one of: direct, group_post_edit, flash_gpe, "
+            "fused_flash_gpe, scd"
         )
     if runs < 1:
         raise ValueError("runs must be at least 1")
     if max_candidates is None:
-        max_candidates = 4 if method == "flash_gpe" else 6
+        max_candidates = (
+            4 if method in {"flash_gpe", "fused_flash_gpe"} else 6
+        )
     label = _safe_label(model_label or Path(model_path).name)
     if output_path is None:
         mode = (
             f".{prompt_type}.max{max_candidates}"
-            if method == "flash_gpe" else ""
+            if method in {"flash_gpe", "fused_flash_gpe"} else ""
         )
         output_path = f"results/qwen_sft_mt_eval.{label}.{method}{mode}.json"
 
@@ -141,6 +146,20 @@ def main(
             retry=retry,
         )
         translations = first_parsed(pipeline["post_edit"])
+    elif method == "fused_flash_gpe":
+        pipeline = run_fused_flash_gpe_pipeline(
+            sources,
+            src_langs,
+            trg_langs,
+            engine=engine,
+            max_candidates=max_candidates,
+            prompt_type=prompt_type,
+            temperature=sampling_temperature,
+            top_p=sampling_top_p,
+            max_tokens=stage1_max_tokens,
+            retry=retry,
+        )
+        translations = first_parsed(pipeline["outputs"])
     else:
         pipeline = run_scd_pipeline(
             sources,
@@ -186,7 +205,11 @@ def main(
             translations,
             score_name=SCORE_NAMES[method],
         )
-        if method in {"group_post_edit", "flash_gpe"}:
+        if method in {
+            "group_post_edit",
+            "flash_gpe",
+            "fused_flash_gpe",
+        }:
             if method == "group_post_edit":
                 summary["candidate_generation_failures"] = sum(
                     max(
@@ -201,6 +224,10 @@ def main(
                     pipeline["usable_candidate_counts"][index] < 2
                     for index in indices
                 )
+                if method == "fused_flash_gpe":
+                    summary["parser_failures"] = sum(
+                        not pipeline["outputs"][index] for index in indices
+                    )
             candidate_counts = [
                 pipeline["usable_candidate_counts"][index]
                 for index in indices
@@ -259,6 +286,14 @@ def main(
                 "usable_candidate_count": pipeline["usable_candidate_counts"][index],
                 "flash_gpe": _record(pipeline["post_edit"][index]),
             })
+        elif method == "fused_flash_gpe":
+            item.update({
+                "candidates": pipeline["candidates"][index],
+                "usable_candidate_count": pipeline[
+                    "usable_candidate_counts"
+                ][index],
+                "fused_flash_gpe": _record(pipeline["outputs"][index]),
+            })
         else:
             item.update({
                 "stage1": _record(pipeline["stage1"][index]),
@@ -290,7 +325,7 @@ def main(
         "summary": summaries,
         "items": items,
     }
-    if method == "flash_gpe":
+    if method in {"flash_gpe", "fused_flash_gpe"}:
         payload["settings"].update({
             "max_candidates": max_candidates,
             "prompt_type": prompt_type,

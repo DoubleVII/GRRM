@@ -11,15 +11,70 @@ from inference.sft_mt_protocol import (
     build_scd_followup_prompt,
     build_scd_stage1_prompt,
     build_sft_direct_prompt,
+    build_sft_fused_flash_gpe_prompt,
     build_sft_gpe_prompt,
     build_sft_flash_gpe_candidate_prompt,
+    format_fused_sft_output,
     format_sft_output,
+    parse_fused_sft_output,
+    parse_fused_task_output,
     parse_sft_output,
     parse_task_output,
 )
 
 
 class SftMtProtocolTest(unittest.TestCase):
+    def test_fused_output_round_trip(self):
+        text = format_fused_sft_output(
+            "generate candidates",
+            "candidate response",
+            "compare candidates",
+            "final response",
+        )
+        envelope = parse_fused_sft_output(text)
+        self.assertEqual(envelope.candidate_thinking, "generate candidates")
+        self.assertEqual(envelope.post_edit_response, "final response")
+        parsed = parse_fused_task_output(
+            text,
+            lambda value: ["a", "b"] if value == "candidate response" else None,
+            lambda value: "final" if value == "final response" else None,
+        )
+        self.assertEqual(parsed["candidates"], ["a", "b"])
+        self.assertEqual(parsed["parsed"], "final")
+
+    def test_fused_output_rejects_malformed_envelopes(self):
+        valid = format_fused_sft_output(
+            "candidate thinking",
+            "candidate response",
+            "post-edit thinking",
+            "post-edit response",
+        )
+        malformed = [
+            valid.replace("<thinking>", "", 1),
+            valid + "\n<thinking>extra</thinking>",
+            valid.replace("candidate thinking", "", 1),
+            "prefix\n" + valid,
+            valid.replace(
+                "<thinking>\ncandidate thinking\n</thinking>\n"
+                "<response>\ncandidate response\n</response>",
+                "<response>\ncandidate response\n</response>\n"
+                "<thinking>\ncandidate thinking\n</thinking>",
+            ),
+        ]
+        for value in malformed:
+            with self.subTest(value=value):
+                self.assertIsNone(parse_fused_sft_output(value))
+        self.assertIsNone(
+            parse_fused_task_output(valid, lambda _: None, lambda _: "final")
+        )
+        self.assertIsNone(
+            parse_fused_task_output(valid, lambda _: ["a", "b"], lambda _: None)
+        )
+        with self.assertRaisesRegex(ValueError, "reserved"):
+            format_fused_sft_output(
+                "bad <thinking>", "candidates", "post-edit", "final"
+            )
+
     @patch("transformers.AutoTokenizer.from_pretrained")
     def test_legacy_row_without_mode_metadata_remains_independent(
         self, from_pretrained
@@ -121,6 +176,7 @@ class SftMtProtocolTest(unittest.TestCase):
         prompts = [
             build_sft_direct_prompt("en", "zh", "Hello"),
             build_sft_flash_gpe_candidate_prompt("en", "zh", "Hello", 4),
+            build_sft_fused_flash_gpe_prompt("en", "zh", "Hello", 4),
             build_sft_gpe_prompt("en", "zh", "Hello", ["你好", "您好"]),
             build_scd_stage1_prompt("en", "zh", "Hello"),
             build_scd_followup_prompt("en", "zh"),

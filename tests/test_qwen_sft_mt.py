@@ -1,14 +1,21 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
+import pandas as pd
+
+from eval.run_qwen_sft_mt_eval import main as run_eval
 from inference.run_qwen_sft_mt import (
     SftMtEngine,
     generate_validated,
     run_flash_gpe_pipeline,
+    run_fused_flash_gpe_pipeline,
     run_gpe_pipeline,
     run_scd_pipeline,
 )
-from inference.sft_mt_protocol import format_sft_output
+from inference.sft_mt_protocol import format_fused_sft_output, format_sft_output
 
 
 class _Tokenizer:
@@ -42,6 +49,135 @@ class _Model:
 
 
 class QwenSftMtTest(unittest.TestCase):
+    @patch("eval.run_qwen_sft_mt_eval._score_translations")
+    @patch("eval.run_qwen_sft_mt_eval.init_oss_model")
+    @patch("eval.run_qwen_sft_mt_eval._release_vllm_model")
+    @patch("eval.run_qwen_sft_mt_eval.run_fused_flash_gpe_pipeline")
+    @patch("eval.run_qwen_sft_mt_eval.init_sft_mt_model")
+    @patch("eval.run_qwen_sft_mt_eval._load_data")
+    def test_fused_flash_gpe_eval_schema(
+        self,
+        load_data,
+        init_model,
+        pipeline,
+        release_model,
+        init_evaluator,
+        score_translations,
+    ):
+        load_data.return_value = pd.DataFrame({
+            "data_id": ["toy"],
+            "source_index": [0],
+            "src_lang": ["en"],
+            "trg_lang": ["zh"],
+            "src_text": ["Hello"],
+            "trg_text": ["你好"],
+        })
+        init_model.return_value = SftMtEngine(
+            model=object(), tokenizer=_Tokenizer()
+        )
+        candidates = ["你好", "您好", "嗨", "你好呀"]
+        output = {
+            "candidate_thinking": "candidate thinking",
+            "candidate_response": json.dumps({"translations": candidates}),
+            "candidates": candidates,
+            "post_edit_thinking": "post-edit thinking",
+            "post_edit_response": "```translation\n您好\n```",
+            "parsed": "您好",
+            "raw_output": "raw",
+        }
+        pipeline.return_value = {
+            "outputs": [[output]],
+            "messages": [[{"role": "user", "content": "prompt"}]],
+            "candidates": [candidates],
+            "usable_candidate_counts": [4],
+        }
+        init_evaluator.return_value = object()
+        score_translations.return_value = {
+            "scores": [91.0],
+            "scores_by_run": [[91.0]],
+            "responses_by_run": [["evaluation"]],
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            destination = Path(temp_dir) / "result.json"
+            run_eval(
+                method="fused_flash_gpe",
+                model_path="checkpoint",
+                output_path=str(destination),
+                data_id="toy",
+                max_candidates=4,
+                prompt_type="fixed_4",
+                runs=1,
+            )
+            payload = json.loads(destination.read_text(encoding="utf-8"))
+
+        pipeline.assert_called_once()
+        self.assertEqual(pipeline.call_args.kwargs["temperature"], 0.8)
+        self.assertEqual(pipeline.call_args.kwargs["top_p"], 0.95)
+        self.assertEqual(pipeline.call_args.kwargs["max_tokens"], 8192)
+        release_model.assert_called_once()
+        self.assertEqual(payload["method"], "fused_flash_gpe")
+        summary = payload["summary"]["overall"]
+        self.assertEqual(summary["fused_flash_gpe_mean"], 91.0)
+        self.assertEqual(summary["candidate_count_distribution"], {"4": 1})
+        self.assertEqual(summary["parser_failures"], 0)
+        self.assertEqual(payload["items"][0]["fused_flash_gpe"]["parsed"], "您好")
+
+    def test_fused_flash_gpe_generates_candidates_and_final_in_one_call(self):
+        candidates = ["你好", "您好", "嗨", "你好呀"]
+        raw_output = format_fused_sft_output(
+            "Create diverse translations.",
+            json.dumps({"translations": candidates}, ensure_ascii=False),
+            "Select the best rendering.",
+            "```translation\n您好\n```",
+        )
+        model = _Model([[[raw_output]]])
+        engine = SftMtEngine(model=model, tokenizer=_Tokenizer())
+
+        result = run_fused_flash_gpe_pipeline(
+            ["Hello"],
+            ["en"],
+            ["zh"],
+            engine=engine,
+            prompt_type="fixed_4",
+            max_candidates=4,
+            retry=0,
+        )
+
+        self.assertEqual(len(model.calls), 1)
+        self.assertEqual(model.params[0].n, 1)
+        self.assertEqual(model.params[0].temperature, 0.8)
+        self.assertEqual(model.params[0].top_p, 0.95)
+        self.assertEqual(model.params[0].max_tokens, 8192)
+        self.assertEqual(result["candidates"], [candidates])
+        self.assertEqual(result["usable_candidate_counts"], [4])
+        output = result["outputs"][0][0]
+        self.assertEqual(output["parsed"], "您好")
+        self.assertEqual(output["candidate_thinking"], "Create diverse translations.")
+        self.assertEqual(output["post_edit_thinking"], "Select the best rendering.")
+        prompt = result["messages"][0][0]["content"]
+        self.assertNotIn("JSON", prompt)
+        self.assertNotIn("<thinking>", prompt)
+        self.assertNotIn("<response>", prompt)
+
+    def test_fused_flash_gpe_retries_invalid_complete_output(self):
+        valid = format_fused_sft_output(
+            "candidate thinking",
+            json.dumps({"translations": ["a", "b", "c", "d"]}),
+            "post-edit thinking",
+            "```translation\nb\n```",
+        )
+        model = _Model([[['invalid']], [[valid]]])
+        engine = SftMtEngine(model=model, tokenizer=_Tokenizer())
+        result = run_fused_flash_gpe_pipeline(
+            ["source"],
+            ["en"],
+            ["zh"],
+            engine=engine,
+            retry=1,
+        )
+        self.assertEqual(len(model.calls), 2)
+        self.assertEqual(result["outputs"][0][0]["parsed"], "b")
+
     def test_flash_gpe_generates_four_candidates_in_two_calls(self):
         candidates = ["你好", "您好", "嗨", "你好呀"]
         stage1_raw = format_sft_output(

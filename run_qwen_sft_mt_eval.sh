@@ -15,7 +15,7 @@ SAMPLING_N="${SAMPLING_N:-4}"
 MAX_CANDIDATES="${MAX_CANDIDATES:-4}"
 PROMPT_TYPE="${PROMPT_TYPE:-fixed_4}"
 EXTRA_ARGS=()
-if [[ "${METHOD}" == "flash_gpe" ]]; then
+if [[ "${METHOD}" == "flash_gpe" || "${METHOD}" == "fused_flash_gpe" ]]; then
   OUTPUT_PATH="${OUTPUT_PATH:-results/qwen_sft_mt_eval.${MODEL_LABEL}.${METHOD}.${PROMPT_TYPE}.max${MAX_CANDIDATES}.json}"
   EXTRA_ARGS+=(--max_candidates "${MAX_CANDIDATES}" --prompt_type "${PROMPT_TYPE}")
 else

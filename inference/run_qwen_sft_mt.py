@@ -17,7 +17,9 @@ from inference.sft_mt_protocol import (
     build_sft_direct_prompt,
     build_sft_flash_gpe_candidate_prompt,
     build_sft_flash_gpe_post_edit_prompt,
+    build_sft_fused_flash_gpe_prompt,
     build_sft_gpe_prompt,
+    parse_fused_task_output,
     parse_task_output,
 )
 from utils.config import LANG_MAP
@@ -89,10 +91,10 @@ def _generate_once(
     return engine.model.generate(rendered, params)
 
 
-def generate_validated(
+def _generate_validated(
     engine: SftMtEngine,
     messages_list: list[list[dict]],
-    inner_parser: Callable[[str], object],
+    parser: Callable[[str], object],
     *,
     temperature: float,
     top_p: float,
@@ -104,7 +106,6 @@ def generate_validated(
     if n < 1:
         raise ValueError("n must be at least 1")
     rendered = [_render_messages(engine, messages) for messages in messages_list]
-    parser = _parse_inner(inner_parser)
     valid: list[list[dict]] = [[] for _ in messages_list]
 
     initial = _generate_once(
@@ -141,6 +142,29 @@ def generate_validated(
             if parsed is not None and len(valid[index]) < n:
                 valid[index].append({**parsed, "raw_output": candidate.text})
     return valid
+
+
+def generate_validated(
+    engine: SftMtEngine,
+    messages_list: list[list[dict]],
+    inner_parser: Callable[[str], object],
+    *,
+    temperature: float,
+    top_p: float,
+    max_tokens: int,
+    retry: int,
+    n: int = 1,
+) -> list[list[dict]]:
+    return _generate_validated(
+        engine,
+        messages_list,
+        _parse_inner(inner_parser),
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        retry=retry,
+        n=n,
+    )
 
 
 def run_direct_stage(
@@ -404,6 +428,63 @@ def run_flash_gpe_pipeline(
     }
 
 
+def run_fused_flash_gpe_pipeline(
+    src_list: list[str],
+    src_langs: list[str],
+    trg_langs: list[str],
+    *,
+    engine: SftMtEngine,
+    max_candidates: int = 4,
+    prompt_type: str = "fixed_4",
+    temperature: float = 0.8,
+    top_p: float = 0.95,
+    max_tokens: int = 8192,
+    retry: int = 3,
+) -> dict:
+    validate_prompt_type(prompt_type, max_candidates)
+    src_langs, trg_langs = _normalize_languages(
+        len(src_list), src_langs, trg_langs
+    )
+    exact_count = prompt_type == "fixed_4"
+    messages = [[{
+        "role": "user",
+        "content": build_sft_fused_flash_gpe_prompt(
+            src_lang,
+            trg_lang,
+            source,
+            max_candidates,
+            exact_count=exact_count,
+        ),
+    }] for source, src_lang, trg_lang in zip(src_list, src_langs, trg_langs)]
+    outputs = _generate_validated(
+        engine,
+        messages,
+        lambda text: parse_fused_task_output(
+            text,
+            lambda response: extract_candidate_response(
+                response,
+                max_candidates,
+                exact_count=exact_count,
+            ),
+            _block_extractor,
+        ),
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        retry=retry,
+        n=1,
+    )
+    candidates = [
+        values[0]["candidates"] if values else [] for values in outputs
+    ]
+    return {
+        "outputs": outputs,
+        "messages": messages,
+        "candidates": candidates,
+        "usable_candidate_counts": [len(values) for values in candidates],
+    }
+
+
 def first_parsed(outputs: list[list[dict]]) -> list[Optional[str]]:
     return [values[0]["parsed"] if values else None for values in outputs]
 
@@ -421,14 +502,21 @@ def main(
     gpu_memory_utilization: float = 0.9,
     max_model_len: int = 32768,
 ):
-    """Run a trained direct, GPE, or SCD model without evaluation."""
+    """Run a trained MT model without evaluation."""
     import pandas as pd
 
     method = method.strip().lower()
-    methods = {"direct", "group_post_edit", "flash_gpe", "scd"}
+    methods = {
+        "direct",
+        "group_post_edit",
+        "flash_gpe",
+        "fused_flash_gpe",
+        "scd",
+    }
     if method not in methods:
         raise ValueError(
-            "method must be one of: direct, group_post_edit, flash_gpe, scd"
+            "method must be one of: direct, group_post_edit, flash_gpe, "
+            "fused_flash_gpe, scd"
         )
     frame = pd.read_parquet(input_path)
     required = {"src_text", "src_lang", "trg_lang"}
@@ -472,6 +560,17 @@ def main(
             retry=retry,
         )
         final_outputs = pipeline["post_edit"]
+    elif method == "fused_flash_gpe":
+        pipeline = run_fused_flash_gpe_pipeline(
+            sources,
+            src_langs,
+            trg_langs,
+            engine=engine,
+            max_candidates=max_candidates,
+            prompt_type=prompt_type,
+            retry=retry,
+        )
+        final_outputs = pipeline["outputs"]
     else:
         pipeline = run_scd_pipeline(
             sources, src_langs, trg_langs, engine=engine, retry=retry
@@ -508,6 +607,14 @@ def main(
             item["flash_gpe"] = (
                 final_outputs[index][0] if final_outputs[index] else None
             )
+        elif method == "fused_flash_gpe":
+            item["candidates"] = pipeline["candidates"][index]
+            item["usable_candidate_count"] = pipeline[
+                "usable_candidate_counts"
+            ][index]
+            item["fused_flash_gpe"] = (
+                final_outputs[index][0] if final_outputs[index] else None
+            )
         else:
             item["stage1"] = pipeline["stage1"][index][0] if pipeline["stage1"][index] else None
             item["stage2"] = final_outputs[index][0] if final_outputs[index] else None
@@ -516,8 +623,16 @@ def main(
         "method": method,
         "model_path": model_path,
         "input_path": input_path,
-        "max_candidates": max_candidates if method == "flash_gpe" else None,
-        "prompt_type": prompt_type if method == "flash_gpe" else None,
+        "max_candidates": (
+            max_candidates
+            if method in {"flash_gpe", "fused_flash_gpe"}
+            else None
+        ),
+        "prompt_type": (
+            prompt_type
+            if method in {"flash_gpe", "fused_flash_gpe"}
+            else None
+        ),
         "generation_failures": sum(not values for values in final_outputs),
         "items": items,
     }

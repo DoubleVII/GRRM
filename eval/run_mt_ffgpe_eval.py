@@ -92,9 +92,9 @@ def main(
         from eval.run_mt_eval import _split_scores_by_data_id
         split = _split_scores_by_data_id(scores, boundaries, n_items, runs)
         for did in data_ids:
-            metric_results[did][metric] = split[did]["all"]["avg"]
-            metric_none[did][metric] = split[did]["all"]["none_count"]
-            per_item[did][metric] = split[did]["all"]["per_item_avgs"]
+            metric_results[did][metric] = split[did]["avg"]
+            metric_none[did][metric] = split[did]["none_count"]
+            per_item[did][metric] = split[did]["per_item_avgs"]
             valid_metrics[did].append(metric)
         all_metrics.append(metric)
 

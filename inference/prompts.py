@@ -54,6 +54,45 @@ candidate_prompt = """Translation {}:
 """
 
 
+FFGPE_PROMPT_TYPES = {"adaptive", "fixed_4", "fixed_16"}
+
+
+def validate_ffgpe_prompt_type(prompt_type: str, max_candidates: int) -> None:
+    if prompt_type not in FFGPE_PROMPT_TYPES:
+        raise ValueError(
+            "prompt_type must be one of: adaptive, fixed_4, fixed_16"
+        )
+    if max_candidates < 2:
+        raise ValueError("max_candidates must be at least 2")
+    if prompt_type == "fixed_4" and max_candidates != 4:
+        raise ValueError("fixed_4 prompt_type requires max_candidates=4")
+    if prompt_type == "fixed_16" and max_candidates != 16:
+        raise ValueError("fixed_16 prompt_type requires max_candidates=16")
+
+
+def build_ffgpe_prompt(
+    source_lang: str,
+    target_lang: str,
+    source_text: str,
+    max_candidates: int = 4,
+    prompt_type: str = "fixed_4",
+) -> str:
+    """Build the shared prompt used by FFGPE SFT, RL, and inference."""
+    validate_ffgpe_prompt_type(prompt_type, max_candidates)
+    source_lang = LANG_MAP.get(source_lang, source_lang)
+    target_lang = LANG_MAP.get(target_lang, target_lang)
+    exact_count = prompt_type in {"fixed_4", "fixed_16"}
+    count = (
+        f"exactly {max_candidates}"
+        if exact_count
+        else f"as many as useful, up to {max_candidates}"
+    )
+    return f"""Translate this text from {source_lang} to {target_lang}. First produce {count} meaningfully different complete translations, keeping each one faithful and natural. Then review those candidates, correct their errors, and produce the best final translation.
+
+Source:
+{source_text}"""
+
+
 def get_task_prompt(prompt_format: str, add_example: bool = False):
     if prompt_format not in Task_format:
         raise ValueError(f"prompt_format must be one of {Task_format.keys()}")

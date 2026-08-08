@@ -2,6 +2,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+from inference.prompts import build_ffgpe_prompt
 from utils.config import LANG_MAP, candidate_identifiers
 
 
@@ -187,19 +188,13 @@ def build_sft_fused_flash_gpe_prompt(
     *,
     exact_count: bool = True,
 ) -> str:
-    if max_candidates < 2:
-        raise ValueError("max_candidates must be at least 2")
-    source_lang = LANG_MAP.get(source_lang, source_lang)
-    target_lang = LANG_MAP.get(target_lang, target_lang)
-    count = (
-        f"exactly {max_candidates}"
-        if exact_count
-        else f"as many as useful, up to {max_candidates}"
+    return build_ffgpe_prompt(
+        source_lang,
+        target_lang,
+        source_text,
+        max_candidates=max_candidates,
+        prompt_type="fixed_4" if exact_count else "adaptive",
     )
-    return f"""Translate this text from {source_lang} to {target_lang}. First produce {count} meaningfully different complete translations, keeping each one faithful and natural. Then review those candidates, correct their errors, and produce the best final translation.
-
-Source:
-{source_text}"""
 
 
 def build_sft_gpe_prompt(

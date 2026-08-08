@@ -7,7 +7,7 @@ from typing import Iterable, Optional
 import pandas as pd
 
 from utils.config import MT_TEST_DATA_META_INFO
-from utils.helpers import build_notes_list, load_datasets_from_dir, split_metrics_by_notes
+from utils.helpers import load_datasets_from_dir
 from inference.run_mt import load_model_tokenizer
 from inference.run_mt_ffgpe import func_call
 from eval.run_mt_eval import (
@@ -32,7 +32,6 @@ def main(
     max_candidates: int = 4,
     runs: int = 1,
     save_results: bool = False,
-    difficulty_filter: int = 0,
     data_dir: Optional[str] = None,
     retry: int = 3,
     **kwargs,
@@ -48,8 +47,6 @@ def main(
     else:
         df, boundaries, lang_pairs, per_id = _load_datasets(data_ids)
     n_items = len(df)
-    notes, note_mask = build_notes_list(df, difficulty_filter, runs)
-
     model, tokenizer = load_model_tokenizer(model_path, **kwargs.get("mt_vllm_kwargs", {}))
     flat_src = df.src_text.tolist() * runs
     flat_src_lang = df.src_lang.tolist() * runs
@@ -80,7 +77,6 @@ def main(
     metric_results = {did: {} for did in data_ids}
     metric_none = {did: {} for did in data_ids}
     per_item = {did: {} for did in data_ids}
-    by_notes = {did: {} for did in data_ids}
     valid_metrics = {did: [] for did in data_ids}
     all_metrics = []
     for metric in metrics:
@@ -93,12 +89,12 @@ def main(
             scores = run_bleurt_eval(df, predictions, runs, kwargs.get("bleurt_model_path"))
         else:
             raise ValueError(f"Unsupported metric: {metric}")
-        split = split_metrics_by_notes(scores, note_mask, boundaries, n_items, runs)
+        from eval.run_mt_eval import _split_scores_by_data_id
+        split = _split_scores_by_data_id(scores, boundaries, n_items, runs)
         for did in data_ids:
             metric_results[did][metric] = split[did]["all"]["avg"]
             metric_none[did][metric] = split[did]["all"]["none_count"]
             per_item[did][metric] = split[did]["all"]["per_item_avgs"]
-            by_notes[did][metric] = split[did]
             valid_metrics[did].append(metric)
         all_metrics.append(metric)
 
@@ -130,7 +126,7 @@ def main(
                 "parser_valid": [output.get("parser_valid", [])[r * n_items + i] for r in range(runs)],
             })
         Path(f"{model_name}__ffgpe.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    log_results_to_wandb(metric_results, {"model_name": model_name, "model_path": model_path, "metrics": all_metrics, "method": "ffgpe", "prompt_type": prompt_type, "max_candidates": max_candidates}, metric_none, by_notes)
+    log_results_to_wandb(metric_results, {"model_name": model_name, "model_path": model_path, "metrics": all_metrics, "method": "ffgpe", "prompt_type": prompt_type, "max_candidates": max_candidates}, metric_none)
 
 
 if __name__ == "__main__":

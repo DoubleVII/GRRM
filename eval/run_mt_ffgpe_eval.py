@@ -108,7 +108,23 @@ def main(
         "parser_failures": sum(not x for x in output.get("parser_valid", [])),
         "generation_failures": sum(x == "Translation Failed." for x in predictions),
     }
-    print(json.dumps(summary, ensure_ascii=False))
+    print("\n=== FFGPE evaluation summary ===")
+    print(f"method: ffgpe | model: {model_name} | prompt_type: {prompt_type} | max_candidates: {max_candidates} | runs: {runs}")
+    print(
+        "candidate_count: "
+        f"mean={summary['candidate_count_mean']:.2f}, "
+        f"range=[{summary['candidate_count_min']}, {summary['candidate_count_max']}], "
+        f"distribution={summary['candidate_count_distribution']}"
+    )
+    print(
+        f"failures: parser={summary['parser_failures']}, "
+        f"generation={summary['generation_failures']}"
+    )
+    for did in data_ids:
+        print(f"\n--- {did} ---")
+        for metric, value in metric_results[did].items():
+            none_count = metric_none[did].get(metric, 0)
+            print(f"{metric}: {value:.6f} (none={none_count})")
     if save_results:
         payload = {
             "method": "ffgpe", "data_name": list(data_ids), "model_name": model_name,

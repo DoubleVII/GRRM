@@ -176,6 +176,8 @@ def build_sft_flash_gpe_candidate_prompt(
         count = f"as many as useful, up to {max_candidates}"
     return f"""Translate this text from {source_lang} to {target_lang} and produce {count} meaningfully different complete translations. Keep every translation faithful and natural.
 
+Output exactly Markdown headings `# Candidate 1` through `# Candidate {max_candidates}`, with one complete translation under each heading. Candidates may contain multiple lines. Do not output code fences, analysis, or any other headings.
+
 Source:
 {source_text}"""
 
@@ -188,13 +190,15 @@ def build_sft_fused_flash_gpe_prompt(
     *,
     exact_count: bool = True,
 ) -> str:
-    return build_ffgpe_prompt(
-        source_lang,
-        target_lang,
-        source_text,
-        max_candidates=max_candidates,
-        prompt_type="fixed_4" if exact_count else "adaptive",
-    )
+    source_lang = LANG_MAP.get(source_lang, source_lang)
+    target_lang = LANG_MAP.get(target_lang, target_lang)
+    count = f"exactly {max_candidates}" if exact_count else f"as many as useful, up to {max_candidates}"
+    return f"""Translate this text from {source_lang} to {target_lang}. First produce {count} faithful, meaningfully different candidates using headings `# Candidate 1` through `# Candidate {max_candidates}`. Then review them and produce one final translation.
+
+Each candidate may contain multiple lines. Do not use code fences. Keep the candidate section and final section clearly separated for the two-stage fused task.
+
+Source:
+{source_text}"""
 
 
 def build_sft_gpe_prompt(

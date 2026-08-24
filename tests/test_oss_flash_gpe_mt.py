@@ -67,6 +67,21 @@ class OssFlashGpeMtTest(unittest.TestCase):
         )
         self.assertIsNone(extract_candidate_response(duplicate, 2))
 
+    def test_markdown_parser_supports_multiline_candidates(self):
+        response = (
+            "# Candidate 1\n\n第一行\n第二行\n\n"
+            "# Candidate 2\n\n另一条翻译"
+        )
+        self.assertEqual(
+            extract_candidate_response(response, 2, exact_count=True),
+            ["第一行\n第二行", "另一条翻译"],
+        )
+        self.assertIsNone(
+            extract_candidate_response(
+                "# Candidate 1\nA\n# Candidate 3\nC", 2, exact_count=True
+            )
+        )
+
     @patch("inference.run_oss_flash_gpe_mt._generate_with_retries")
     @patch("inference.run_oss_flash_gpe_mt._prepare_inputs")
     @patch("inference.run_oss_flash_gpe_mt.load_encoding")

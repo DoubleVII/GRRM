@@ -51,7 +51,7 @@ def main(
         values = normalize_flash_gpe_row(row)
         if not values["parser_valid"]:
             raise ValueError(f"Input row {source_index} is not parser-valid")
-        exact_count = values["prompt_type"] == "fixed_4"
+        exact_count = values["prompt_type"] in {"markdown", "fixed_4", "fixed_16"}
         assistant = format_fused_sft_output(
             values["candidate_thinking"],
             values["candidate_response"],

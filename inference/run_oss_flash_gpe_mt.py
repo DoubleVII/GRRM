@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import Optional, Union
 
@@ -13,6 +14,9 @@ from inference.run_oss_diverse_mt import (
     _prepare_inputs,
     extract_json_object,
 )
+from inference.legacy.oss_flash_gpe_json import (
+    extract_candidate_response as extract_legacy_json_candidate_response,
+)
 from inference.run_oss_group_post_edit import func_call as run_group_post_edit
 
 
@@ -21,18 +25,30 @@ def extract_candidate_response(
     max_candidates: int,
     *,
     exact_count: bool = False,
+    format: str = "markdown",
 ) -> Optional[list[str]]:
-    value = extract_json_object(response)
-    translations = value.get("translations") if isinstance(value, dict) else None
-    if not isinstance(translations, list):
+    if format == "json" or (isinstance(response, str) and response.lstrip().startswith(("{", "```json"))):
+        return extract_legacy_json_candidate_response(
+            response.strip().removeprefix("```json").removesuffix("```").strip(),
+            max_candidates,
+            exact_count=exact_count,
+        )
+    if not isinstance(response, str):
         return None
-    if not 2 <= len(translations) <= max_candidates:
+    matches = list(re.finditer(r"(?m)^# Candidate ([1-9][0-9]*)[ \t]*$", response))
+    if not matches or (exact_count and len(matches) != max_candidates):
         return None
-    if exact_count and len(translations) != max_candidates:
+    if not 2 <= len(matches) <= max_candidates:
         return None
-    if any(not isinstance(item, str) or not item.strip() for item in translations):
-        return None
-    translations = [item.strip() for item in translations]
+    translations = []
+    for index, match in enumerate(matches):
+        if int(match.group(1)) != index + 1:
+            return None
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(response)
+        value = response[match.end():end].strip()
+        if not value or "```" in value:
+            return None
+        translations.append(value)
     normalized = {" ".join(item.split()).casefold() for item in translations}
     if len(normalized) != len(translations):
         return None
@@ -60,8 +76,9 @@ def run_candidate_generation_stage(
     src_langs: Union[str, list[str]],
     trg_langs: Union[str, list[str]],
     *,
-    max_candidates: int = 4,
-    prompt_type: str = "fixed_4",
+    max_candidates: int = 8,
+    prompt_type: str = "markdown",
+    candidate_counts: Optional[list[int]] = None,
     model=None,
     model_path: str = "openai/gpt-oss-120b",
     reasoning_effort: Optional[str] = "medium",
@@ -76,30 +93,35 @@ def run_candidate_generation_stage(
     )
     llm = init_oss_model(model_path) if model is None else model
     encoding = load_encoding()
-    prompts = [
-        build_candidate_prompt(
-            src_lang,
-            trg_lang,
-            source,
-            max_candidates,
-            prompt_type=prompt_type,
+    if candidate_counts is None:
+        candidate_counts = [max_candidates] * len(src_list)
+    if len(candidate_counts) != len(src_list):
+        raise ValueError("candidate_counts must match src_list length")
+    if any(not isinstance(count, int) or not 2 <= count <= max_candidates for count in candidate_counts):
+        raise ValueError("candidate_counts must be between 2 and max_candidates")
+    prompts = [build_candidate_prompt(
+        src_lang, trg_lang, source, candidate_count, prompt_type=prompt_type
+    ) for source, src_lang, trg_lang, candidate_count in zip(
+        src_list, src_langs, trg_langs, candidate_counts
+    )]
+    results = [None] * len(src_list)
+    for count in sorted(set(candidate_counts)):
+        indices = [i for i, value in enumerate(candidate_counts) if value == count]
+        group_results = _generate_with_retries(
+            llm,
+            _prepare_inputs([prompts[i] for i in indices], encoding, reasoning_effort),
+            lambda response, count=count: extract_candidate_response(
+                response, count, exact_count=True,
+                format="markdown" if prompt_type == "markdown" else "json",
+            ),
+            encoding,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            retry=retry,
         )
-        for source, src_lang, trg_lang in zip(src_list, src_langs, trg_langs)
-    ]
-    results = _generate_with_retries(
-        llm,
-        _prepare_inputs(prompts, encoding, reasoning_effort),
-        lambda response: extract_candidate_response(
-            response,
-            max_candidates,
-            exact_count=prompt_type == "fixed_4",
-        ),
-        encoding,
-        temperature=temperature,
-        top_p=top_p,
-        max_tokens=max_tokens,
-        retry=retry,
-    )
+        for index, result in zip(indices, group_results):
+            results[index] = result
     return {
         "prompts": prompts,
         "translations": [result["parsed"] or [] for result in results],
@@ -115,8 +137,9 @@ def run_pipeline(
     *,
     model,
     model_path: str,
-    max_candidates: int = 4,
-    prompt_type: str = "fixed_4",
+    max_candidates: int = 8,
+    prompt_type: str = "markdown",
+    candidate_counts: Optional[list[int]] = None,
     reasoning_effort: str = "medium",
     candidate_temperature: float = 0.8,
     candidate_top_p: float = 0.95,
@@ -133,6 +156,7 @@ def run_pipeline(
         trg_langs,
         max_candidates=max_candidates,
         prompt_type=prompt_type,
+        candidate_counts=candidate_counts,
         model=model,
         model_path=model_path,
         reasoning_effort=reasoning_effort,
@@ -188,8 +212,8 @@ def main(
     output_path: str,
     model_path: str = "openai/gpt-oss-120b",
     max_samples: int = 0,
-    max_candidates: int = 4,
-    prompt_type: str = "fixed_4",
+    max_candidates: int = 8,
+    prompt_type: str = "markdown",
     reasoning_effort: str = "medium",
     candidate_temperature: float = 0.8,
     candidate_top_p: float = 0.95,

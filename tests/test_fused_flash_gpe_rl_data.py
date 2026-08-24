@@ -21,11 +21,7 @@ class FusedFlashGpeRlDataTest(unittest.TestCase):
             source = Path(temp_dir) / "input.parquet"
             destination = Path(temp_dir) / "train.parquet"
             self._write_input(source)
-            prepare(
-                str(source),
-                str(destination),
-                max_samples=1,
-            )
+            prepare(str(source), str(destination), max_samples=1, seed=1)
             result = pd.read_parquet(destination)
 
         self.assertEqual(len(result), 1)
@@ -35,14 +31,14 @@ class FusedFlashGpeRlDataTest(unittest.TestCase):
         self.assertNotIn("messages", result.columns)
         prompt = row["prompt"][0]
         self.assertEqual(prompt["role"], "user")
-        self.assertIn("exactly 4", prompt["content"])
+        self.assertRegex(prompt["content"], r"exactly [2-8]")
         self.assertNotIn("JSON", prompt["content"])
         self.assertNotIn("<thinking>", prompt["content"])
         self.assertNotIn("<response>", prompt["content"])
         self.assertEqual(row["reward_model"]["ground_truth"], "")
         self.assertEqual(row["extra_info"]["ref_text"], "你好")
-        self.assertEqual(row["extra_info"]["prompt_type"], "fixed_4")
-        self.assertEqual(row["extra_info"]["max_candidates"], 4)
+        self.assertEqual(row["extra_info"]["prompt_type"], "markdown")
+        self.assertEqual(row["extra_info"]["max_candidates"], 8)
 
     def test_adaptive_prompt_and_optional_reference(self):
         with tempfile.TemporaryDirectory() as temp_dir:

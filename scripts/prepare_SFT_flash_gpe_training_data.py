@@ -85,7 +85,7 @@ def main(
             lambda response: extract_candidate_response(
                 response,
                 values["max_candidates"],
-                exact_count=values["prompt_type"] == "fixed_4",
+                exact_count=values["prompt_type"] in {"markdown", "fixed_4", "fixed_16"},
             ),
         )
         if (
@@ -103,7 +103,7 @@ def main(
                     row["trg_lang"],
                     row["src_text"],
                     values["max_candidates"],
-                    exact_count=values["prompt_type"] == "fixed_4",
+                    exact_count=True,
                 ),
             },
             {"role": "assistant", "content": candidate_assistant},

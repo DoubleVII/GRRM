@@ -3,6 +3,7 @@ from typing import Optional, Union
 from inference.prompts import build_ffgpe_prompt, validate_ffgpe_prompt_type
 from inference.run_mt import _block_extractor, load_model_tokenizer
 from inference.run_oss_flash_gpe_mt import extract_candidate_response
+from inference.run_oss_group_post_edit import extract_response as extract_flash_gpe_post_edit
 from inference.sft_mt_protocol import parse_fused_task_output
 
 
@@ -11,7 +12,7 @@ def _parse_ffgpe_response(
     max_candidates: int,
     prompt_type: str,
 ) -> Optional[dict]:
-    exact_count = prompt_type in {"fixed_4", "fixed_16"}
+    exact_count = prompt_type in {"markdown", "fixed_4", "fixed_16"}
     return parse_fused_task_output(
         text,
         lambda response: extract_candidate_response(
@@ -19,7 +20,7 @@ def _parse_ffgpe_response(
             max_candidates,
             exact_count=exact_count,
         ),
-        _block_extractor,
+        extract_flash_gpe_post_edit,
     )
 
 

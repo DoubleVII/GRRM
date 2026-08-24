@@ -49,20 +49,24 @@ CUDA_VISIBLE_DEVICES=0,1 .venv/bin/python -m data.run_oss_flash_gpe_sft_data \
   --data_path INPUT.parquet \
   --output_path OUTPUT.flash_gpe.fixed_4.parquet \
   --model_path /home/zfs01/yangs/LLM/openai/gpt-oss-120b \
-  --prompt_type fixed_4 \
-  --max_candidates 4
+  --prompt_type markdown \
+  --min_candidates 2 \
+  --max_candidates 8
 ```
 
-FlashGPE Stage 1 stores one prompt, thinking trace, and JSON response whose
-parsed `translations` array contains the candidates. Stage 2 receives those
-translations and performs post-editing. Its columns are:
+FlashGPE Stage 1 uses numbered Markdown headings (`# Candidate 1`, etc.) and
+stores one prompt, thinking trace, and response whose parsed candidates may be
+multiline. Stage 2 uses `# Step-by-step Analysis` and `# Final Translation`.
+The deprecated JSON protocol is retained under `inference/legacy/` only for
+reproducing historical rows. Its columns are:
 
 - `flash_gpe_stage1_prompt`, `flash_gpe_stage1_thinking`,
   `flash_gpe_stage1_response`, `flash_gpe_candidates`
 - `flash_gpe_stage2_prompt`, `flash_gpe_stage2_thinking`,
   `flash_gpe_stage2_response`, `flash_gpe_translation`
 - `flash_gpe_prompt_type`, `flash_gpe_max_candidates`,
-  `flash_gpe_candidate_count`, `flash_gpe_parser_valid`
+  `flash_gpe_target_candidate_count`, `flash_gpe_candidate_count`,
+  `flash_gpe_protocol`, `flash_gpe_parser_valid`
 
 The FlashGPE SFT preparation script writes `flash_gpe_candidates` and
 `flash_gpe` datasets. It also accepts legacy rows marked with

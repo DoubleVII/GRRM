@@ -6,6 +6,7 @@ from typing import Callable, Optional, Union
 from inference.run_mt import _block_extractor
 from inference.oss_flash_gpe_prompts import validate_prompt_type
 from inference.run_oss_flash_gpe_mt import extract_candidate_response
+from inference.run_oss_group_post_edit import extract_response as extract_flash_gpe_post_edit
 from inference.run_oss_diverse_mt import (
     extract_final_translation,
     extract_json_object,
@@ -203,8 +204,8 @@ def run_flash_gpe_candidate_stage(
     trg_langs: Union[str, list[str]],
     *,
     engine: SftMtEngine,
-    max_candidates: int = 4,
-    prompt_type: str = "fixed_4",
+    max_candidates: int = 8,
+    prompt_type: str = "markdown",
     temperature: float = 0.8,
     top_p: float = 0.95,
     max_tokens: int = 4096,
@@ -212,7 +213,7 @@ def run_flash_gpe_candidate_stage(
 ) -> dict:
     validate_prompt_type(prompt_type, max_candidates)
     src_langs, trg_langs = _normalize_languages(len(src_list), src_langs, trg_langs)
-    exact_count = prompt_type == "fixed_4"
+    exact_count = prompt_type in {"markdown", "fixed_4", "fixed_16"}
     messages = [[{
         "role": "user",
         "content": build_sft_flash_gpe_candidate_prompt(
@@ -365,8 +366,8 @@ def run_flash_gpe_pipeline(
     trg_langs: list[str],
     *,
     engine: SftMtEngine,
-    max_candidates: int = 4,
-    prompt_type: str = "fixed_4",
+    max_candidates: int = 8,
+    prompt_type: str = "markdown",
     candidate_temperature: float = 0.8,
     candidate_top_p: float = 0.95,
     candidate_max_tokens: int = 4096,
@@ -445,7 +446,7 @@ def run_fused_flash_gpe_pipeline(
     src_langs, trg_langs = _normalize_languages(
         len(src_list), src_langs, trg_langs
     )
-    exact_count = prompt_type == "fixed_4"
+    exact_count = prompt_type in {"markdown", "fixed_4", "fixed_16"}
     messages = [[{
         "role": "user",
         "content": build_sft_fused_flash_gpe_prompt(
@@ -466,7 +467,7 @@ def run_fused_flash_gpe_pipeline(
                 max_candidates,
                 exact_count=exact_count,
             ),
-            _block_extractor,
+            extract_flash_gpe_post_edit,
         ),
         temperature=temperature,
         top_p=top_p,

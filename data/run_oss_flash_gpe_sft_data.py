@@ -1,4 +1,5 @@
 from pathlib import Path
+import random
 
 import fire
 import pandas as pd
@@ -24,8 +25,9 @@ def main(
     trg_lang_key: str = "trg_lang",
     model_path: str = "openai/gpt-oss-120b",
     max_samples: int = 0,
-    max_candidates: int = 4,
-    prompt_type: str = "fixed_4",
+    min_candidates: int = 2,
+    max_candidates: int = 8,
+    prompt_type: str = "markdown",
     reasoning_effort: str = "medium",
     candidate_temperature: float = 0.8,
     candidate_top_p: float = 0.95,
@@ -34,6 +36,7 @@ def main(
     post_edit_top_p: float = 0.8,
     post_edit_max_tokens: int = 4096,
     retry: int = 3,
+    seed: int = 114514,
     gpu_memory_utilization: float = 0.9,
     max_model_len: int = 32768,
 ):
@@ -41,6 +44,8 @@ def main(
     if not output_path.endswith(".parquet"):
         raise ValueError("output_path must end with .parquet")
     validate_prompt_type(prompt_type, max_candidates)
+    if not 2 <= min_candidates <= max_candidates:
+        raise ValueError("Expected 2 <= min_candidates <= max_candidates")
     frame = pd.read_parquet(data_path)
     required = {src_key, src_lang_key, trg_lang_key}
     missing = sorted(required - set(frame.columns))
@@ -49,6 +54,12 @@ def main(
     if max_samples > 0:
         frame = frame.head(max_samples)
     frame = frame.reset_index(drop=True)
+    rng = random.Random(seed)
+    candidate_counts = [
+        rng.randint(min_candidates, max_candidates) for _ in range(len(frame))
+    ]
+    if prompt_type != "markdown":
+        candidate_counts = [max_candidates] * len(frame)
     model = init_oss_model(
         model_path,
         gpu_memory_utilization=gpu_memory_utilization,
@@ -62,6 +73,7 @@ def main(
         model_path=model_path,
         max_candidates=max_candidates,
         prompt_type=prompt_type,
+        candidate_counts=candidate_counts,
         reasoning_effort=reasoning_effort,
         candidate_temperature=candidate_temperature,
         candidate_top_p=candidate_top_p,
@@ -88,7 +100,7 @@ def main(
             post_edit_response=post_edit_response,
             post_edit_thinking=post_edit_thinking,
             post_edit_translation=translation,
-            max_candidates=max_candidates,
+            max_candidates=candidate_counts[index],
             prompt_type=prompt_type,
         ):
             invalid_count += 1
@@ -106,7 +118,9 @@ def main(
             "sft_method_name": METHOD_NAME,
             "flash_gpe_prompt_type": prompt_type,
             "flash_gpe_max_candidates": max_candidates,
+            "flash_gpe_target_candidate_count": candidate_counts[index],
             "flash_gpe_candidate_count": len(candidates),
+            "flash_gpe_protocol": "markdown_headings" if prompt_type == "markdown" else "legacy_json",
             "flash_gpe_stage1_prompt": candidate_prompt,
             "flash_gpe_stage1_thinking": candidate_thinking,
             "flash_gpe_stage1_response": candidate_response,

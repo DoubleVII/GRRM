@@ -22,7 +22,7 @@ def validate_flash_gpe_record(
         extract_candidate_response(
             candidate_response,
             max_candidates,
-            exact_count=prompt_type == "fixed_4",
+            exact_count=prompt_type in {"markdown", "fixed_4", "fixed_16"},
         )
         if nonempty_text(candidate_response)
         else None
@@ -46,7 +46,7 @@ def normalize_flash_gpe_row(row: Any) -> dict:
     if "flash_gpe_parser_valid" in row.index:
         return {
             "prompt_type": row["flash_gpe_prompt_type"],
-            "max_candidates": int(row["flash_gpe_max_candidates"]),
+            "max_candidates": int(row.get("flash_gpe_target_candidate_count", row["flash_gpe_max_candidates"])),
             "candidate_prompt": row["flash_gpe_stage1_prompt"],
             "candidate_thinking": row["flash_gpe_stage1_thinking"],
             "candidate_response": row["flash_gpe_stage1_response"],

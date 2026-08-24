@@ -1,4 +1,5 @@
 from pathlib import Path
+import random
 
 import fire
 import pandas as pd
@@ -14,14 +15,17 @@ ABILITY = "fused_flash_gpe"
 def main(
     data_path: str,
     output_path: str,
-    prompt_type: str = "fixed_4",
-    max_candidates: int = 4,
+    prompt_type: str = "markdown",
+    min_candidates: int = 2,
+    max_candidates: int = 8,
     include_reference_info: bool = True,
     max_samples: int = 0,
     seed: int = 114514,
 ):
     """Build prompt-only Fused FlashGPE RL training data."""
     validate_prompt_type(prompt_type, max_candidates)
+    if not 2 <= min_candidates <= max_candidates:
+        raise ValueError("Expected 2 <= min_candidates <= max_candidates")
     frame = pd.read_parquet(data_path)
     required = {"src_text", "src_lang", "trg_lang"}
     if include_reference_info:
@@ -33,9 +37,14 @@ def main(
         frame = frame.head(max_samples)
     frame = frame.reset_index(drop=True)
 
-    exact_count = prompt_type == "fixed_4"
+    rng = random.Random(seed)
     records = []
     for source_index, row in frame.iterrows():
+        candidate_count = (
+            rng.randint(min_candidates, max_candidates)
+            if prompt_type == "markdown"
+            else max_candidates
+        )
         extra_info = {
             "source_index": source_index,
             "src_lang": row["src_lang"],
@@ -43,6 +52,8 @@ def main(
             "src_text": row["src_text"],
             "prompt_type": prompt_type,
             "max_candidates": max_candidates,
+            "target_candidate_count": candidate_count,
+            "protocol": "markdown_headings",
         }
         if include_reference_info:
             extra_info.update({
@@ -57,8 +68,8 @@ def main(
                     row["src_lang"],
                     row["trg_lang"],
                     row["src_text"],
-                    max_candidates,
-                    exact_count=exact_count,
+                    candidate_count,
+                    exact_count=prompt_type in {"markdown", "fixed_4", "fixed_16"},
                 ),
             }],
             "ability": ABILITY,

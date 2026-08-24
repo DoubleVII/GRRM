@@ -54,13 +54,13 @@ candidate_prompt = """Translation {}:
 """
 
 
-FFGPE_PROMPT_TYPES = {"adaptive", "fixed_4", "fixed_16"}
+FFGPE_PROMPT_TYPES = {"markdown", "adaptive", "fixed_4", "fixed_16"}
 
 
 def validate_ffgpe_prompt_type(prompt_type: str, max_candidates: int) -> None:
     if prompt_type not in FFGPE_PROMPT_TYPES:
         raise ValueError(
-            "prompt_type must be one of: adaptive, fixed_4, fixed_16"
+            "prompt_type must be one of: markdown, adaptive, fixed_4, fixed_16"
         )
     if max_candidates < 2:
         raise ValueError("max_candidates must be at least 2")
@@ -81,13 +81,15 @@ def build_ffgpe_prompt(
     validate_ffgpe_prompt_type(prompt_type, max_candidates)
     source_lang = LANG_MAP.get(source_lang, source_lang)
     target_lang = LANG_MAP.get(target_lang, target_lang)
-    exact_count = prompt_type in {"fixed_4", "fixed_16"}
+    exact_count = prompt_type in {"markdown", "fixed_4", "fixed_16"}
     count = (
         f"exactly {max_candidates}"
         if exact_count
         else f"as many as useful, up to {max_candidates}"
     )
     return f"""Translate this text from {source_lang} to {target_lang}. First produce {count} meaningfully different complete translations, keeping each one faithful and natural. Then review those candidates, correct their errors, and produce the best final translation.
+
+For the candidate section, output exactly consecutive Markdown headings `# Candidate 1` through `# Candidate {max_candidates}`, with one complete translation under each heading. Candidates may contain multiple lines. Do not use code fences or add unrelated headings.
 
 Source:
 {source_text}"""

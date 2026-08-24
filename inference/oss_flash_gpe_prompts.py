@@ -5,7 +5,7 @@ from inference.prompts import (
 )
 
 
-PROMPT_TYPES = {"adaptive", "fixed_4", "fixed_16"}
+PROMPT_TYPES = {"markdown", "adaptive", "fixed_4", "fixed_16"}
 
 
 def build_post_edit_prompt(
@@ -25,18 +25,36 @@ def build_post_edit_prompt(
         candidate_prompt.format(index + 1, value)
         for index, value in enumerate(candidates)
     )
-    return oss_group_post_edit_prompt_templates.format(
-        source_lang=source_lang,
-        target_lang=target_lang,
-        source_text=source_text,
-        candidate_prompts=rendered,
-    )
+    return f"""You are a translation post-editing agent.
+
+Read the source and all numbered candidates. Select the best candidate or carefully combine them, correcting errors while preserving every source fact.
+
+Output exactly this Markdown structure:
+# Step-by-step Analysis
+
+[step-by-step analysis]
+
+# Final Translation
+
+[one complete final translation in {target_lang}]
+
+Do not use code fences. Do not add text outside these two sections.
+
+Source language: {source_lang}
+Target language: {target_lang}
+
+Source text:
+```
+{source_text}
+```
+
+{rendered}"""
 
 
 def validate_prompt_type(prompt_type: str, max_candidates: int) -> None:
     if prompt_type not in PROMPT_TYPES:
         raise ValueError(
-            "prompt_type must be one of: adaptive, fixed_4, fixed_16"
+            "prompt_type must be one of: markdown, adaptive, fixed_4, fixed_16"
         )
     if max_candidates < 2:
         raise ValueError("max_candidates must be at least 2")
@@ -51,11 +69,35 @@ def build_candidate_prompt(
     target_lang: str,
     source_text: str,
     max_candidates: int = 4,
-    prompt_type: str = "fixed_4",
+    prompt_type: str = "markdown",
+    candidate_count: int | None = None,
 ) -> str:
     validate_prompt_type(prompt_type, max_candidates)
+    if candidate_count is not None:
+        if not 2 <= candidate_count <= max_candidates:
+            raise ValueError("candidate_count must be between 2 and max_candidates")
+        max_candidates = candidate_count
     source_lang = LANG_MAP.get(source_lang, source_lang)
     target_lang = LANG_MAP.get(target_lang, target_lang)
+    if prompt_type == "markdown":
+        return f"""Translate the source text from {source_lang} to {target_lang} and produce exactly {max_candidates} complete translation candidates.
+
+The candidates will be compared by a separate post-editing stage. Make them genuinely diverse while keeping every candidate independently correct and complete. Preserve all source facts, entities, numbers, units, polarity, degree, time, and logical relationships. Diversity never permits mistranslation, omission, unsupported content, or commentary inside a translation.
+
+Output only the following Markdown structure. Use exactly the consecutive headings `# Candidate 1` through `# Candidate {max_candidates}`. Put one complete {target_lang} translation under each heading. A translation may contain multiple lines. Do not add any other headings, analysis, code fences, or text before or after the candidates.
+
+# Candidate 1
+
+first complete {target_lang} translation
+
+# Candidate 2
+
+second complete {target_lang} translation
+
+Source text:
+<source>
+{source_text}
+</source>"""
     if prompt_type == "fixed_4":
         return f"""Translate the source text from {source_lang} to {target_lang} and produce exactly 4 complete translation candidates in one response.
 

@@ -190,13 +190,16 @@ def build_sft_fused_flash_gpe_prompt(
     *,
     exact_count: bool = True,
 ) -> str:
-    source_lang = LANG_MAP.get(source_lang, source_lang)
-    target_lang = LANG_MAP.get(target_lang, target_lang)
-    count = f"exactly {max_candidates}" if exact_count else f"as many as useful, up to {max_candidates}"
-    return f"""Translate this text from {source_lang} to {target_lang}. First produce {count} faithful, meaningfully different candidates using headings `# Candidate 1` through `# Candidate {max_candidates}`. Then review them and produce one final translation.
-
-Source:
-{source_text}"""
+    # Keep fused SFT/RL/inference prompts on one source of truth. ``exact_count``
+    # maps to the current Markdown protocol; the non-exact path retains the
+    # adaptive legacy behavior without duplicating prompt text here.
+    return build_ffgpe_prompt(
+        source_lang,
+        target_lang,
+        source_text,
+        max_candidates=max_candidates,
+        prompt_type="markdown" if exact_count else "adaptive",
+    )
 
 
 def build_sft_gpe_prompt(

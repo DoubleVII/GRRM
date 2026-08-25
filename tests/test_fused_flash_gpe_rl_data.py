@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from inference.prompts import build_ffgpe_prompt
+from inference.sft_mt_protocol import build_sft_fused_flash_gpe_prompt
 from scripts.prepare_RL_fused_flash_gpe_training_data import main as prepare
 
 
@@ -15,6 +17,24 @@ class FusedFlashGpeRlDataTest(unittest.TestCase):
             "src_lang": ["en", "en"],
             "trg_lang": ["zh", "zh"],
         }).to_parquet(path, index=False)
+
+    def test_fused_prompt_uses_shared_ffgpe_prompt(self):
+        self.assertEqual(
+            build_sft_fused_flash_gpe_prompt(
+                "en", "zh", "Hello", 4, exact_count=True
+            ),
+            build_ffgpe_prompt(
+                "en", "zh", "Hello", 4, prompt_type="markdown"
+            ),
+        )
+        self.assertEqual(
+            build_sft_fused_flash_gpe_prompt(
+                "en", "zh", "Hello", 8, exact_count=False
+            ),
+            build_ffgpe_prompt(
+                "en", "zh", "Hello", 8, prompt_type="adaptive"
+            ),
+        )
 
     def test_builds_prompt_only_rl_schema(self):
         with tempfile.TemporaryDirectory() as temp_dir:

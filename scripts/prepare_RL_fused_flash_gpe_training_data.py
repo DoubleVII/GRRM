@@ -20,12 +20,16 @@ def main(
     max_candidates: int = 8,
     include_reference_info: bool = True,
     max_samples: int = 0,
+    repeat_times: int = 1,
     seed: int = 114514,
+    testset: bool = False,
 ):
     """Build prompt-only Fused FlashGPE RL training data."""
     validate_prompt_type(prompt_type, max_candidates)
     if not 2 <= min_candidates <= max_candidates:
         raise ValueError("Expected 2 <= min_candidates <= max_candidates")
+    if repeat_times < 1:
+        raise ValueError("repeat_times must be at least 1")
     frame = pd.read_parquet(data_path)
     required = {"src_text", "src_lang", "trg_lang"}
     if include_reference_info:
@@ -40,42 +44,51 @@ def main(
     rng = random.Random(seed)
     records = []
     for source_index, row in frame.iterrows():
-        candidate_count = (
-            rng.randint(min_candidates, max_candidates)
-            if prompt_type == "markdown"
-            else max_candidates
-        )
-        extra_info = {
-            "source_index": source_index,
-            "src_lang": row["src_lang"],
-            "trg_lang": row["trg_lang"],
-            "src_text": row["src_text"],
-            "prompt_type": prompt_type,
-            "max_candidates": max_candidates,
-            "target_candidate_count": candidate_count,
-            "protocol": "markdown_headings",
-        }
-        if include_reference_info:
-            extra_info.update({
-                "ref_lang": row["trg_lang"],
-                "ref_text": row["trg_text"],
+        candidate_counts = []
+        while len(candidate_counts) < repeat_times:
+            cycle = list(range(min_candidates, max_candidates + 1))
+            rng.shuffle(cycle)
+            candidate_counts.extend(cycle)
+        if prompt_type != "markdown":
+            candidate_counts = [max_candidates] * repeat_times
+
+        for repeat_index, candidate_count in enumerate(
+            candidate_counts[:repeat_times]
+        ):
+            extra_info = {
+                "source_index": source_index,
+                "repeat_index": repeat_index,
+                "src_lang": row["src_lang"],
+                "trg_lang": row["trg_lang"],
+                "src_text": row["src_text"],
+                "prompt_type": prompt_type,
+                "max_candidates": max_candidates,
+                "target_candidate_count": candidate_count,
+                "protocol": "markdown_headings",
+            }
+            if include_reference_info:
+                extra_info.update({
+                    "ref_lang": row["trg_lang"],
+                    "ref_text": row["trg_text"],
+                })
+            records.append({
+                "data_source": DATA_SOURCE,
+                "prompt": [{
+                    "role": "user",
+                    "content": build_sft_fused_flash_gpe_prompt(
+                        row["src_lang"],
+                        row["trg_lang"],
+                        row["src_text"],
+                        candidate_count,
+                        exact_count=prompt_type in {
+                            "markdown", "fixed_4", "fixed_16"
+                        },
+                    ),
+                }],
+                "ability": ABILITY,
+                "reward_model": {"ground_truth": ""} if not testset else {"ground_truth": "", 'style': 'rule'},
+                "extra_info": extra_info,
             })
-        records.append({
-            "data_source": DATA_SOURCE,
-            "prompt": [{
-                "role": "user",
-                "content": build_sft_fused_flash_gpe_prompt(
-                    row["src_lang"],
-                    row["trg_lang"],
-                    row["src_text"],
-                    candidate_count,
-                    exact_count=prompt_type in {"markdown", "fixed_4", "fixed_16"},
-                ),
-            }],
-            "ability": ABILITY,
-            "reward_model": {"ground_truth": ""},
-            "extra_info": extra_info,
-        })
 
     output = pd.DataFrame(records).sample(
         frac=1.0, random_state=seed

@@ -81,6 +81,40 @@ class FusedFlashGpeRlDataTest(unittest.TestCase):
         self.assertIn("up to 8", row["prompt"][0]["content"])
         self.assertNotIn("ref_text", row["extra_info"])
 
+    def test_repeats_inputs_with_distinct_candidate_counts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "input.parquet"
+            destination = Path(temp_dir) / "train.parquet"
+            self._write_input(source)
+            prepare(
+                str(source),
+                str(destination),
+                max_samples=1,
+                repeat_times=4,
+                min_candidates=2,
+                max_candidates=5,
+                seed=1,
+            )
+            result = pd.read_parquet(destination)
+
+        self.assertEqual(len(result), 4)
+        infos = list(result["extra_info"])
+        self.assertEqual({info["source_index"] for info in infos}, {0})
+        self.assertEqual({info["repeat_index"] for info in infos}, {0, 1, 2, 3})
+        counts = {info["target_candidate_count"] for info in infos}
+        self.assertEqual(counts, {2, 3, 4, 5})
+        for row in result.itertuples():
+            count = row.extra_info["target_candidate_count"]
+            self.assertIn(f"exactly {count}", row.prompt[0]["content"])
+
+    def test_rejects_invalid_repeat_times(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "input.parquet"
+            destination = Path(temp_dir) / "train.parquet"
+            self._write_input(source)
+            with self.assertRaisesRegex(ValueError, "repeat_times"):
+                prepare(str(source), str(destination), repeat_times=0)
+
     def test_rejects_incompatible_fixed_prompt_count(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             source = Path(temp_dir) / "input.parquet"

@@ -85,7 +85,7 @@ class OssFlashGpeMtTest(unittest.TestCase):
     @patch("inference.run_oss_flash_gpe_mt._generate_with_retries")
     @patch("inference.run_oss_flash_gpe_mt._prepare_inputs")
     @patch("inference.run_oss_flash_gpe_mt.load_encoding")
-    def test_candidate_stage_uses_one_request_per_source(
+    def test_candidate_stage_batches_different_candidate_counts(
         self, load_encoding, prepare_inputs, generate
     ):
         load_encoding.return_value = object()
@@ -99,10 +99,17 @@ class OssFlashGpeMtTest(unittest.TestCase):
             ["en", "zh"],
             ["zh", "en"],
             max_candidates=3,
-            prompt_type="adaptive",
+            prompt_type="markdown",
+            candidate_counts=[2, 3],
             model=object(),
         )
+        self.assertEqual(generate.call_count, 1)
         self.assertEqual(len(generate.call_args.args[1]), 2)
+        self.assertTrue(generate.call_args.kwargs["parser_with_index"])
+        parser = generate.call_args.args[2]
+        two_candidates = "# Candidate 1\nA\n# Candidate 2\nB"
+        self.assertEqual(parser(two_candidates, 0), ["A", "B"])
+        self.assertIsNone(parser(two_candidates, 1))
         self.assertEqual(result["translations"], [["a1", "a2"], ["b1", "b2"]])
         self.assertEqual(result["responses"], ["ra", "rb"])
 

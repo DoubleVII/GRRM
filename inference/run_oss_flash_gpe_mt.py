@@ -104,24 +104,22 @@ def run_candidate_generation_stage(
     ) for source, src_lang, trg_lang, candidate_count in zip(
         src_list, src_langs, trg_langs, candidate_counts
     )]
-    results = [None] * len(src_list)
-    for count in sorted(set(candidate_counts)):
-        indices = [i for i, value in enumerate(candidate_counts) if value == count]
-        group_results = _generate_with_retries(
-            llm,
-            _prepare_inputs([prompts[i] for i in indices], encoding, reasoning_effort),
-            lambda response, count=count: extract_candidate_response(
-                response, count, exact_count=True,
-                format="markdown" if prompt_type == "markdown" else "json",
-            ),
-            encoding,
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-            retry=retry,
-        )
-        for index, result in zip(indices, group_results):
-            results[index] = result
+    results = _generate_with_retries(
+        llm,
+        _prepare_inputs(prompts, encoding, reasoning_effort),
+        lambda response, index: extract_candidate_response(
+            response,
+            candidate_counts[index],
+            exact_count=True,
+            format="markdown" if prompt_type == "markdown" else "json",
+        ),
+        encoding,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        retry=retry,
+        parser_with_index=True,
+    )
     return {
         "prompts": prompts,
         "translations": [result["parsed"] or [] for result in results],

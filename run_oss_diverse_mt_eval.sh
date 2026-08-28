@@ -10,6 +10,7 @@ MAX_SAMPLES="${MAX_SAMPLES:-0}"
 PROMPT_TYPE="${PROMPT_TYPE:-json}"
 POLISH="${POLISH:-true}"
 CANDIDATE_CONFIDENCE="${CANDIDATE_CONFIDENCE:-true}"
+MAX_DECISION_POINTS="${MAX_DECISION_POINTS:-4}"
 RUNS="${RUNS:-4}"
 
 case "${POLISH}" in
@@ -23,6 +24,9 @@ case "${CANDIDATE_CONFIDENCE}" in
   *) echo "CANDIDATE_CONFIDENCE must be true or false" >&2; exit 2 ;;
 esac
 VARIANT="${PROMPT_TYPE}.${POLISH_VARIANT}.${CONFIDENCE_VARIANT}"
+if [[ "${PROMPT_TYPE}" == "decision_points" ]]; then
+  VARIANT="${VARIANT}.dp${MAX_DECISION_POINTS}"
+fi
 OUTPUT_PATH="${OUTPUT_PATH:-results/oss_diverse_mt_eval.${VARIANT}.json}"
 
 echo "VARIANT=${VARIANT}"
@@ -35,6 +39,7 @@ echo "VARIANT=${VARIANT}"
   --prompt_type "${PROMPT_TYPE}" \
   --polish "${POLISH}" \
   --candidate_confidence "${CANDIDATE_CONFIDENCE}" \
+  --max_decision_points "${MAX_DECISION_POINTS}" \
   --reasoning_effort medium \
   --min_candidates 3 \
   --max_candidates 6 \
@@ -45,5 +50,5 @@ echo "VARIANT=${VARIANT}"
   --stage1_max_tokens 8192 \
   --final_max_tokens 4096 \
   --runs "${RUNS}" \
-  --gpu_memory_utilization 0.9 \
+  --gpu_memory_utilization 0.85 \
   --max_model_len 32768

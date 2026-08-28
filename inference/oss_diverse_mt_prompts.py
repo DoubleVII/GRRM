@@ -15,15 +15,75 @@ def build_divergent_prompt(
     max_candidates: int = 6,
     prompt_type: str = "json",
     candidate_confidence: bool = False,
+    max_decision_points: int = 4,
 ) -> str:
     source_lang = _language_name(source_lang)
     target_lang = _language_name(target_lang)
+    if prompt_type == "decision_points":
+        if candidate_confidence:
+            raise ValueError(
+                "candidate_confidence is not supported for decision_points"
+            )
+        return f"""You are performing the exploratory first stage of a translation task from {source_lang} to {target_lang}.
+
+Do not translate the full source and do not divide it into exhaustive translation segments. Instead, identify only high-impact translation decision points where two or more contextually plausible choices could materially change correctness. A decision point may be a genuinely ambiguous term, idiom, culturally specific expression, difficult attachment, or another compact source span whose best rendering cannot be chosen mechanically from the full context.
+
+Requirements:
+- Return zero decision points when the source has no meaningful local ambiguity or terminology risk. Do not invent decision points for easy wording.
+- Normally return 0 to 2 decision points. Return 3 or 4 only for unusually difficult sources with that many independent, consequential choices. The limit of {max_decision_points} is a hard ceiling, not a target or desired count.
+- Do not create a decision point merely because a span is a name, date, number, ordinary technical term, or register marker. Include one only when there is a real risk that alternatives would lead to materially different translations.
+- Decision points do not need to cover the source, preserve source order, or be mutually exclusive; overlapping spans are allowed when they represent different decisions.
+- Copy each source_span exactly from the source and keep it as compact as possible while retaining enough context to make the decision meaningful.
+- Normally give {min_candidates} to {max_candidates} genuinely distinct local {target_lang} candidates per decision point. Give fewer only when fewer meaningful alternatives exist.
+- Candidate differences must concern meaning, terminology, idiom handling, register, or another consequential translation choice, not superficial punctuation or function-word variation.
+- Every candidate must preserve the same source facts. Diversity never permits changing an entity, number, unit, polarity, degree, time, or logical relationship. Discard a candidate if it is fluent but factually inconsistent with the source.
+- Before proposing candidates involving quantities, explicitly verify the magnitude and unit. For example, when translating into Chinese, $10 billion is 100亿美元, not 10亿美元. All candidates must use a factually equivalent quantity.
+- Add global_constraints only for whole-text relationships that Stage 2 must preserve, such as negation or quantifier scope, entity and number consistency, long-distance modification, condition, causality, comparison, coreference, or discourse relations. State the intended source meaning, not a target-language translation.
+- In global_constraints, spell out exact numeric magnitudes, units, dates, and entity relationships whenever they are easy to confuse. Do not merely repeat an ambiguous surface form.
+- Do not assign confidence labels, select a winner, compose a draft, or output a final translation.
+
+Return only one valid JSON object with this schema:
+{{
+  "source_analysis": "brief global analysis of meaning, context, tone, and the main translation risks",
+  "global_constraints": [
+    "a concise whole-text semantic constraint that Stage 2 must preserve"
+  ],
+  "decision_points": [
+    {{
+      "decision_point_id": 1,
+      "source_span": "an exact compact span copied from the source",
+      "issue_type": "terminology, idiom, entity, word_sense, attachment, register, culture, or another short label",
+      "analysis": "why this decision matters in the full source context",
+      "candidates": [
+        {{"translation": "local {target_lang} translation", "angle": "the consequential interpretation or rendering this candidate explores"}}
+      ]
+    }}
+  ]
+}}
+
+Source text:
+<source>
+{source_text}
+</source>"""
+
+    if prompt_type == "semantic_units":
+        unit_task = """Analyze the source, identify ordered semantic translation units, and propose diverse translation candidates for every unit.
+
+A unit may range from a single word or term through a phrase or clause to a complete sentence. Choose the span needed to preserve a coherent meaning or translation decision; do not prefer small units merely because they are easy to isolate. Use a larger phrase, clause, or sentence when splitting it would weaken negation or quantifier scope, attachment, causality, comparison, coreference, idiomatic meaning, tone, or another cross-word dependency.
+
+Units may overlap, and parent-child units are encouraged when they support exploration at complementary levels. A parent unit should preserve the complete meaning and dependencies of a larger phrase, clause, or sentence. Its child units may separately explore important terms, idioms, entities, or local ambiguities inside that span. Give candidates for both levels: parent candidates explore coherent renderings of the complete span, while child candidates preserve local alternatives that Stage 2 may use when composing or polishing the parent meaning. Order units by where they begin in the source; for units with the same start, place the larger unit first. Avoid duplicate units that explore the same span at the same semantic level."""
+        coverage_task = """- Collectively cover all lexical content in the source, but do not force a partition: meaningful overlap is allowed. Boundary punctuation may remain outside units, but no words or meaning may be omitted.
+- Use semantically complete parent units to cover the source, then add focused child units where local exploration is useful. Do not fragment ordinary compositional wording into child units that offer no meaningful translation choice."""
+    else:
+        unit_task = """Analyze the source, divide it into ordered, non-overlapping translation units, and propose diverse local translation candidates for every unit. A unit may be a clause, idiom, term, name, discourse marker, or other span that should be translated together."""
+        coverage_task = """- Cover all lexical content in the source and preserve its order. Boundary punctuation may remain between units, but no words or meaning may be omitted."""
+
     shared_task = f"""You are performing the divergent first stage of a translation task from {source_lang} to {target_lang}.
 
-Analyze the source, divide it into ordered, non-overlapping translation units, and propose diverse local translation candidates for every unit. A unit may be a clause, idiom, term, name, discourse marker, or other span that should be translated together.
+{unit_task}
 
 The purpose of this stage is exploration, not selection:
-- Cover all lexical content in the source and preserve its order. Boundary punctuation may remain between units, but no words or meaning may be omitted.
+{coverage_task}
 - Normally give {min_candidates} to {max_candidates} genuinely distinct candidates per unit. Explore plausible differences in sense, register, syntax, idiom handling, terminology, and target-language naturalness.
 - Do not create superficial variants that differ only in punctuation or one interchangeable function word.
 - Give fewer than {min_candidates} candidates only when there is truly no meaningful alternative; briefly state why in the unit analysis.
@@ -64,8 +124,11 @@ Output format requirements:
 
 {codeblock_source_section}"""
 
-    if prompt_type != "json":
-        raise ValueError("prompt_type must be one of: json, codeblock")
+    if prompt_type not in {"json", "semantic_units"}:
+        raise ValueError(
+            "prompt_type must be one of: json, codeblock, semantic_units, "
+            "decision_points"
+        )
 
     confidence_schema = (
         ', "confidence": "high"'
@@ -103,6 +166,7 @@ def build_convergent_prompt(
     *,
     polish: bool = True,
     candidate_confidence: bool = False,
+    prompt_type: str = "json",
 ) -> str:
     source_lang = _language_name(source_lang)
     target_lang = _language_name(target_lang)
@@ -112,6 +176,48 @@ def build_convergent_prompt(
         divergent_context = divergent_result.strip()
     else:
         raise ValueError("divergent_result must be a non-empty dict or string")
+    if prompt_type == "decision_points":
+        if candidate_confidence:
+            raise ValueError(
+                "candidate_confidence is not supported for decision_points"
+            )
+        polish_requirement = (
+            f"""- Polish the complete draft for idiomatic phrasing, sentence structure, cohesion, punctuation, and consistent register so it reads as an originally written {target_lang} text.
+"""
+            if polish
+            else ""
+        )
+        return f"""You are performing the final stage of a translation task from {source_lang} to {target_lang}.
+
+The source and a selective analysis of high-impact translation decision points are provided below. The analysis deliberately does not cover the full source and must never be treated as pieces to concatenate.
+
+Work in this order:
+1. Read the complete source and independently construct a faithful, coherent full-text draft without relying on the decision-point candidates.
+2. Check every global constraint against that draft, especially negation and quantifier scope, entities, numbers, units, long-distance modification, condition, causality, comparison, and coreference. Independently recompute numeric magnitudes from the source instead of trusting the analysis or candidates.
+3. Consult each decision point only as optional evidence. Use, edit, or reject its candidates according to the full source context. Reject any candidate that changes a fact even if it is fluent or repeated by several candidates. Keep the independent draft when none of the candidates improves it.
+4. Re-read the complete source and perform a final fidelity audit. Local improvements must not damage global meaning or relationships.
+
+Requirements:
+- Translate the complete source without additions or omissions.
+- The source is authoritative; the selective analysis may be incomplete or wrong.
+- Preserve every number and unit at the correct magnitude. For example, when translating into Chinese, $10 billion is 100亿美元, not 10亿美元.
+{polish_requirement}- Preserve the source's intended tone and formatting where appropriate.
+- Output only the final translation between the exact tags below. Do not include analysis, labels, Markdown fences, or text outside the tags.
+
+<source>
+{source_text}
+</source>
+
+<decision_point_analysis>
+{divergent_context}
+</decision_point_analysis>
+
+<final_translation>...</final_translation>"""
+    if prompt_type not in {"json", "codeblock", "semantic_units"}:
+        raise ValueError(
+            "prompt_type must be one of: json, codeblock, semantic_units, "
+            "decision_points"
+        )
     confidence_requirement = ""
     if candidate_confidence:
         confidence_requirement = """

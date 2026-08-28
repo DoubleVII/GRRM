@@ -124,12 +124,40 @@ def _diversity_stats(
     candidate_counts = []
     duplicate_counts = 0
     total_candidates = 0
+    global_constraint_counts = []
+    decision_point_counts = []
+    decision_point_candidate_counts = []
+    containment_overlap_counts = []
     confidence_counts = {"high": 0, "medium": 0, "low": 0}
     for analysis in analyses:
-        if not analysis or not isinstance(analysis, dict) or "segments" not in analysis:
+        if not analysis or not isinstance(analysis, dict):
+            continue
+        if prompt_type == "decision_points":
+            constraints = analysis.get("global_constraints", [])
+            decision_points = analysis.get("decision_points", [])
+            global_constraint_counts.append(len(constraints))
+            decision_point_counts.append(len(decision_points))
+            for decision_point in decision_points:
+                candidates = [
+                    candidate["translation"].strip()
+                    for candidate in decision_point["candidates"]
+                ]
+                decision_point_candidate_counts.append(len(candidates))
+                normalized = {candidate.casefold() for candidate in candidates}
+                duplicate_counts += len(candidates) - len(normalized)
+                total_candidates += len(candidates)
+            continue
+        if "segments" not in analysis:
             continue
         segments = analysis["segments"]
         segment_counts.append(len(segments))
+        if prompt_type == "semantic_units":
+            spans = [segment["source_span"].strip() for segment in segments]
+            containment_overlap_counts.append(sum(
+                left in right or right in left
+                for index, left in enumerate(spans)
+                for right in spans[:index]
+            ))
         for segment in segments:
             candidates = [candidate["translation"].strip() for candidate in segment["candidates"]]
             candidate_counts.append(len(candidates))
@@ -149,19 +177,60 @@ def _diversity_stats(
             else len(json.dumps(analysis, ensure_ascii=False))
             for analysis in analyses if analysis is not None
         ]),
-        "mean_segments_per_item": _mean(segment_counts) if prompt_type == "json" else None,
-        "mean_candidates_per_segment": _mean(candidate_counts) if prompt_type == "json" else None,
+        "mean_segments_per_item": (
+            _mean(segment_counts)
+            if prompt_type in {"json", "semantic_units"}
+            else None
+        ),
+        "mean_candidates_per_segment": (
+            _mean(candidate_counts)
+            if prompt_type in {"json", "semantic_units"}
+            else None
+        ),
         "segments_below_three_candidates": (
-            sum(count < 3 for count in candidate_counts) if prompt_type == "json" else None
+            sum(count < 3 for count in candidate_counts)
+            if prompt_type in {"json", "semantic_units"}
+            else None
+        ),
+        "mean_containment_overlaps_per_item": (
+            _mean(containment_overlap_counts)
+            if prompt_type == "semantic_units"
+            else None
         ),
         "exact_duplicate_candidate_rate": (
             duplicate_counts / total_candidates
-            if prompt_type == "json" and total_candidates
+            if prompt_type in {"json", "semantic_units", "decision_points"}
+            and total_candidates
+            else None
+        ),
+        "mean_global_constraints_per_item": (
+            _mean(global_constraint_counts)
+            if prompt_type == "decision_points"
+            else None
+        ),
+        "mean_decision_points_per_item": (
+            _mean(decision_point_counts)
+            if prompt_type == "decision_points"
+            else None
+        ),
+        "items_without_decision_points": (
+            sum(count == 0 for count in decision_point_counts)
+            if prompt_type == "decision_points"
+            else None
+        ),
+        "mean_candidates_per_decision_point": (
+            _mean(decision_point_candidate_counts)
+            if prompt_type == "decision_points"
+            else None
+        ),
+        "decision_points_below_three_candidates": (
+            sum(count < 3 for count in decision_point_candidate_counts)
+            if prompt_type == "decision_points"
             else None
         ),
         "confidence_counts": (
             confidence_counts
-            if prompt_type == "json" and candidate_confidence
+            if prompt_type in {"json", "semantic_units"} and candidate_confidence
             else None
         ),
         "confidence_rates": (
@@ -169,20 +238,28 @@ def _diversity_stats(
                 level: count / total_candidates
                 for level, count in confidence_counts.items()
             }
-            if prompt_type == "json" and candidate_confidence and total_candidates
+            if prompt_type in {"json", "semantic_units"}
+            and candidate_confidence
+            and total_candidates
             else None
         ),
     }
 
 
 def _prompt_variant(
-    prompt_type: str, polish: bool, candidate_confidence: bool
+    prompt_type: str,
+    polish: bool,
+    candidate_confidence: bool,
+    max_decision_points: int = 4,
 ) -> str:
-    return ".".join([
+    parts = [
         prompt_type,
         "polish" if polish else "no-polish",
         "confidence" if candidate_confidence else "no-confidence",
-    ])
+    ]
+    if prompt_type == "decision_points":
+        parts.append(f"dp{max_decision_points}")
+    return ".".join(parts)
 
 
 def _summary_for_indices(
@@ -243,6 +320,7 @@ def main(
     prompt_type: str = "json",
     polish: bool = True,
     candidate_confidence: bool = False,
+    max_decision_points: int = 4,
     divergent_temperature: float = 0.8,
     divergent_top_p: float = 0.95,
     final_temperature: float = 0.3,
@@ -259,12 +337,28 @@ def main(
     candidate_confidence = normalize_bool(
         candidate_confidence, "candidate_confidence"
     )
-    if prompt_type not in {"json", "codeblock"}:
-        raise ValueError("prompt_type must be one of: json, codeblock")
+    if prompt_type not in {
+        "json", "codeblock", "semantic_units", "decision_points"
+    }:
+        raise ValueError(
+            "prompt_type must be one of: json, codeblock, semantic_units, "
+            "decision_points"
+        )
+    if prompt_type == "decision_points" and candidate_confidence:
+        raise ValueError(
+            "candidate_confidence is not supported for decision_points"
+        )
+    if max_decision_points < 0:
+        raise ValueError("max_decision_points must be at least 0")
     if runs < 1:
         raise ValueError("runs must be at least 1")
     if output_path is None:
-        variant = _prompt_variant(prompt_type, polish, candidate_confidence)
+        variant = _prompt_variant(
+            prompt_type,
+            polish,
+            candidate_confidence,
+            max_decision_points=max_decision_points,
+        )
         output_path = f"results/oss_diverse_mt_eval.{variant}.json"
     data_ids = _parse_data_ids(data_id)
     frame = _load_data(data_ids, max_samples, seed)
@@ -287,6 +381,7 @@ def main(
         prompt_type=prompt_type,
         polish=polish,
         candidate_confidence=candidate_confidence,
+        max_decision_points=max_decision_points,
         divergent_temperature=divergent_temperature,
         divergent_top_p=divergent_top_p,
         final_temperature=final_temperature,
@@ -348,6 +443,7 @@ def main(
             "prompt_type": prompt_type,
             "polish": polish,
             "candidate_confidence": candidate_confidence,
+            "max_decision_points": max_decision_points,
             "divergent_temperature": divergent_temperature,
             "divergent_top_p": divergent_top_p,
             "final_temperature": final_temperature,

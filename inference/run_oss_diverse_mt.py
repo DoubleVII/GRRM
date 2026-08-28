@@ -121,6 +121,51 @@ def validate_divergent_result(
     return value
 
 
+def validate_decision_points_result(
+    value: Optional[dict], max_decision_points: Optional[int] = None
+) -> Optional[dict]:
+    if not isinstance(value, dict) or not isinstance(value.get("source_analysis"), str):
+        return None
+    constraints = value.get("global_constraints")
+    if not isinstance(constraints, list) or any(
+        not isinstance(constraint, str) or not constraint.strip()
+        for constraint in constraints
+    ):
+        return None
+    decision_points = value.get("decision_points")
+    if not isinstance(decision_points, list):
+        return None
+    if max_decision_points is not None and len(decision_points) > max_decision_points:
+        return None
+    for expected_id, decision_point in enumerate(decision_points, start=1):
+        if not isinstance(decision_point, dict):
+            return None
+        if decision_point.get("decision_point_id") != expected_id:
+            return None
+        for field in ("source_span", "issue_type"):
+            if not isinstance(decision_point.get(field), str) or not decision_point[
+                field
+            ].strip():
+                return None
+        if not isinstance(decision_point.get("analysis"), str):
+            return None
+        candidates = decision_point.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            return None
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                return None
+            if not isinstance(candidate.get("translation"), str) or not candidate[
+                "translation"
+            ].strip():
+                return None
+            if not isinstance(candidate.get("angle"), str):
+                return None
+            if "confidence" in candidate:
+                return None
+    return value
+
+
 def extract_final_translation(text: str) -> Optional[str]:
     text = (text or "").strip()
     start_tag = "<final_translation>"
@@ -193,13 +238,14 @@ def _response_text(token_ids: list[int], encoding: HarmonyEncoding) -> tuple[Opt
 def _generate_with_retries(
     llm,
     inputs: list[dict],
-    parser: Callable[[str], Any],
+    parser: Callable[..., Any],
     encoding: HarmonyEncoding,
     *,
     temperature: float,
     top_p: float,
     max_tokens: int,
     retry: int,
+    parser_with_index: bool = False,
 ) -> list[dict]:
     from vllm import SamplingParams
 
@@ -225,7 +271,9 @@ def _generate_with_retries(
             thinking, response = _response_text(
                 output.outputs[0].token_ids, encoding
             )
-            parsed = parser(response) if response is not None else None
+            parsed = (
+                parser(response, index) if parser_with_index else parser(response)
+            ) if response is not None else None
             last_attempts[index] = {
                 "parsed": parsed,
                 "response": response,
@@ -254,6 +302,7 @@ def run_divergent_stage(
     max_candidates: int = 6,
     prompt_type: str = "json",
     candidate_confidence: bool = False,
+    max_decision_points: int = 4,
     temperature: float = 0.8,
     top_p: float = 0.95,
     max_tokens: int = 8192,
@@ -266,8 +315,19 @@ def run_divergent_stage(
         raise ValueError("All input lists must have the same length")
     if not (1 <= min_candidates <= max_candidates):
         raise ValueError("Expected 1 <= min_candidates <= max_candidates")
-    if prompt_type not in {"json", "codeblock"}:
-        raise ValueError("prompt_type must be one of: json, codeblock")
+    if prompt_type not in {
+        "json", "codeblock", "semantic_units", "decision_points"
+    }:
+        raise ValueError(
+            "prompt_type must be one of: json, codeblock, semantic_units, "
+            "decision_points"
+        )
+    if max_decision_points < 0:
+        raise ValueError("max_decision_points must be at least 0")
+    if prompt_type == "decision_points" and candidate_confidence:
+        raise ValueError(
+            "candidate_confidence is not supported for decision_points"
+        )
     llm = init_oss_model(model_path) if model is None else model
     encoding = load_encoding()
     prompts = [
@@ -279,19 +339,23 @@ def run_divergent_stage(
             max_candidates,
             prompt_type=prompt_type,
             candidate_confidence=candidate_confidence,
+            max_decision_points=max_decision_points,
         )
         for source, sl, tl in zip(src_list, src_langs, trg_langs)
     ]
-    parser = (
-        (
+    if prompt_type in {"json", "semantic_units"}:
+        parser = (
             lambda text: validate_divergent_result(
                 extract_json_object(text),
                 candidate_confidence=candidate_confidence,
             )
         )
-        if prompt_type == "json"
-        else extract_codeblock_response
-    )
+    elif prompt_type == "decision_points":
+        parser = lambda text: validate_decision_points_result(
+            extract_json_object(text), max_decision_points=max_decision_points
+        )
+    else:
+        parser = extract_codeblock_response
     results = _generate_with_retries(
         llm,
         _prepare_inputs(prompts, encoding, reasoning_effort),
@@ -320,6 +384,7 @@ def run_convergent_stage(
     reasoning_effort: Optional[str] = "medium",
     polish: bool = True,
     candidate_confidence: bool = False,
+    prompt_type: str = "json",
     temperature: float = 0.3,
     top_p: float = 0.8,
     max_tokens: int = 4096,
@@ -342,6 +407,7 @@ def run_convergent_stage(
             divergent,
             polish=polish,
             candidate_confidence=candidate_confidence,
+            prompt_type=prompt_type,
         )
         for source, divergent, sl, tl in zip(
             src_list, divergent_results, src_langs, trg_langs
@@ -377,6 +443,7 @@ def run_pipeline(
     prompt_type: str = "json",
     polish: bool = True,
     candidate_confidence: bool = False,
+    max_decision_points: int = 4,
     divergent_temperature: float = 0.8,
     divergent_top_p: float = 0.95,
     final_temperature: float = 0.3,
@@ -396,6 +463,7 @@ def run_pipeline(
         max_candidates=max_candidates,
         prompt_type=prompt_type,
         candidate_confidence=candidate_confidence,
+        max_decision_points=max_decision_points,
         temperature=divergent_temperature,
         top_p=divergent_top_p,
         max_tokens=stage1_max_tokens,
@@ -422,6 +490,7 @@ def run_pipeline(
             reasoning_effort=reasoning_effort,
             polish=polish,
             candidate_confidence=candidate_confidence,
+            prompt_type=prompt_type,
             temperature=final_temperature,
             top_p=final_top_p,
             max_tokens=final_max_tokens,
@@ -448,6 +517,7 @@ def main(
     prompt_type: str = "json",
     polish: bool = True,
     candidate_confidence: bool = False,
+    max_decision_points: int = 4,
     divergent_temperature: float = 0.8,
     divergent_top_p: float = 0.95,
     final_temperature: float = 0.3,
@@ -465,8 +535,17 @@ def main(
     candidate_confidence = normalize_bool(
         candidate_confidence, "candidate_confidence"
     )
-    if prompt_type not in {"json", "codeblock"}:
-        raise ValueError("prompt_type must be one of: json, codeblock")
+    if prompt_type not in {
+        "json", "codeblock", "semantic_units", "decision_points"
+    }:
+        raise ValueError(
+            "prompt_type must be one of: json, codeblock, semantic_units, "
+            "decision_points"
+        )
+    if prompt_type == "decision_points" and candidate_confidence:
+        raise ValueError(
+            "candidate_confidence is not supported for decision_points"
+        )
     frame = pd.read_parquet(input_path)
     required = {"src_text", "src_lang", "trg_lang"}
     missing = sorted(required - set(frame.columns))
@@ -492,6 +571,7 @@ def main(
         prompt_type=prompt_type,
         polish=polish,
         candidate_confidence=candidate_confidence,
+        max_decision_points=max_decision_points,
         divergent_temperature=divergent_temperature,
         divergent_top_p=divergent_top_p,
         final_temperature=final_temperature,
@@ -523,6 +603,7 @@ def main(
             "prompt_type": prompt_type,
             "polish": polish,
             "candidate_confidence": candidate_confidence,
+            "max_decision_points": max_decision_points,
             "divergent_temperature": divergent_temperature,
             "divergent_top_p": divergent_top_p,
             "final_temperature": final_temperature,

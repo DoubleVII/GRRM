@@ -21,7 +21,7 @@ Output exactly this Markdown structure:
 
 [one complete final translation in {target_lang}]
 
-Do not use code fences. Do not add text before, between, or after the required sections. The final translation must be the last content in the response.
+The final translation must be the last content in the response.
 
 Source text:
 <source>

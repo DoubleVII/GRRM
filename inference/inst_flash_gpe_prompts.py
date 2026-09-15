@@ -84,7 +84,7 @@ Read the source and all numbered candidates. Select the best candidate or carefu
 
 [one complete final translation in {target_lang}]
 
-Do not use code fences or add text outside the required sections.
+The final translation must be the last content in the response.
 
 Source language: {source_lang}
 Target language: {target_lang}

@@ -172,8 +172,8 @@ def _normalize_languages(size: int, src_langs: Union[str, list[str]], trg_langs:
 
 def run_candidate_generation_stage(src_list, src_langs, trg_langs, *, max_candidates=8,
                                    candidate_counts=None,
-                                   model, temperature=1.0, top_p=0.95, top_k=20,
-                                   presence_penalty=1.5, repetition_penalty=1.0,
+                                   model, temperature=1.0, top_p=1.0, top_k=0,
+                                   presence_penalty=0.0, repetition_penalty=1.0,
                                    max_tokens=8192,
                                    retry=3, enable_thinking=True):
     validate_prompt_type("markdown", max_candidates)
@@ -208,11 +208,11 @@ def run_candidate_generation_stage(src_list, src_langs, trg_langs, *, max_candid
 
 def run_pipeline(src_list, src_langs, trg_langs, *, model, max_candidates=8,
                  candidate_counts=None,
-                 candidate_temperature=1.0, candidate_top_p=0.95,
-                 candidate_top_k=20, candidate_presence_penalty=1.5,
+                 candidate_temperature=1.0, candidate_top_p=1.0,
+                 candidate_top_k=0, candidate_presence_penalty=0.0,
                  candidate_repetition_penalty=1.0, candidate_max_tokens=8192,
-                 post_edit_temperature=1.0, post_edit_top_p=0.95,
-                 post_edit_top_k=20, post_edit_presence_penalty=1.5,
+                 post_edit_temperature=1.0, post_edit_top_p=1.0,
+                 post_edit_top_k=0, post_edit_presence_penalty=0.0,
                  post_edit_repetition_penalty=1.0, post_edit_max_tokens=8192,
                  retry=3, enable_thinking=True):
     candidate = run_candidate_generation_stage(
@@ -258,12 +258,12 @@ def run_pipeline(src_list, src_langs, trg_langs, *, model, max_candidates=8,
 
 def main(input_path: str, output_path: str, model_path: str, max_samples: int = 0,
          max_candidates: int = 8, candidate_temperature: float = 1.0,
-         candidate_top_p: float = 0.95, candidate_top_k: int = 20,
-         candidate_presence_penalty: float = 1.5,
+         candidate_top_p: float = 1.0, candidate_top_k: int = 0,
+         candidate_presence_penalty: float = 0.0,
          candidate_repetition_penalty: float = 1.0,
          candidate_max_tokens: int = 8192,
-         post_edit_temperature: float = 1.0, post_edit_top_p: float = 0.95,
-         post_edit_top_k: int = 20, post_edit_presence_penalty: float = 1.5,
+         post_edit_temperature: float = 1.0, post_edit_top_p: float = 1.0,
+         post_edit_top_k: int = 0, post_edit_presence_penalty: float = 0.0,
          post_edit_repetition_penalty: float = 1.0,
          post_edit_max_tokens: int = 8192, retry: int = 3, enable_thinking: bool = True,
          gpu_memory_utilization: float = 0.9, max_model_len: int = 32768):

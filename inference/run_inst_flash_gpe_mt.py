@@ -8,6 +8,7 @@ from inference.inst_flash_gpe_prompts import (
     build_post_edit_prompt,
     validate_prompt_type,
 )
+from inference.run_mt import _block_extractor
 from utils.helpers import get_auto_tp_size
 
 
@@ -100,8 +101,11 @@ def extract_post_edit_response(
             return None
     elif not response.startswith(marker) or response.count(marker) != 1:
         return None
-    value = response.split(marker, 1)[1].strip()
-    if not value or value.startswith("# ") or "```" in value:
+    final_section = response.split(marker, 1)[1].strip()
+    if not final_section.startswith("```"):
+        return None
+    value = _block_extractor(final_section)
+    if value is None or value.startswith("# ") or "```" in value:
         return None
     return value
 

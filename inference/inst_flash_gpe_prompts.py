@@ -82,9 +82,11 @@ Read the source and all numbered candidates. Select the best candidate or carefu
 {visible_analysis}
 # Final Translation
 
+```
 [one complete final translation in {target_lang}]
+```
 
-The final translation must be the last content in the response.
+The final translation must be the last content in the response and enclosed in code blocks.
 
 Source language: {source_lang}
 Target language: {target_lang}

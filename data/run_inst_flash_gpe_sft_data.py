@@ -29,7 +29,10 @@ def _valid_record(
     enable_thinking,
 ):
     """Check that both generated stages round-trip through the task parsers."""
-    if not candidate_thinking or not post_edit_thinking:
+    if enable_thinking:
+        if not candidate_thinking or not post_edit_thinking:
+            return False
+    elif candidate_thinking is not None or post_edit_thinking is not None:
         return False
     explicit_analysis = not enable_thinking
     parsed_candidates = extract_candidate_response(

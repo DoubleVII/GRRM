@@ -19,11 +19,15 @@ Output exactly this Markdown structure:
 
 # Final Translation
 
+```
 [one complete final translation in {target_lang}]
+```
 
-The final translation must be the last content in the response.
+
+The final translation must be the last content in the response and enclosed in code blocks.
 
 Source text:
-<source>
+
+```
 {source_text}
-</source>"""
+```"""

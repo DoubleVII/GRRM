@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Callable, Optional, Union
 
 from inference.inst_mt_prompts import build_translation_prompt
+from inference.run_mt import _block_extractor
 from utils.helpers import get_auto_tp_size
 
 
@@ -59,10 +60,13 @@ def extract_translation_response(response: str) -> Optional[dict[str, str]]:
         return None
     marker_index = response.index(translation_marker)
     analysis = response[len(analysis_marker):marker_index].strip()
-    translation = response[marker_index + len(translation_marker):].strip()
-    if not analysis or not translation:
+    final_section = response[marker_index + len(translation_marker):].strip()
+    if not analysis or not final_section:
         return None
-    if "```" in analysis or "```" in translation or translation.startswith("# "):
+    if "```" in analysis or not final_section.startswith("```"):
+        return None
+    translation = _block_extractor(final_section)
+    if translation is None or "```" in translation or translation.startswith("# "):
         return None
     return {"analysis": analysis, "translation": translation}
 

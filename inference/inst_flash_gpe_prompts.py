@@ -37,7 +37,7 @@ The candidates will be compared by a separate post-editing stage. Make them genu
 
 {analysis_instruction} Use exactly the consecutive headings `# Candidate 1` through `# Candidate {max_candidates}`. Put one complete {target_lang} translation under each heading. A translation may contain multiple lines.
 
-{prefix} 
+{prefix}
 # Candidate 1
 
 first complete {target_lang} translation

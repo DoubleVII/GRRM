@@ -1,26 +1,59 @@
 from typing import Optional, Union
 
+from inference.ffgpe_protocol import (
+    parse_simple_task_output,
+    validate_ffgpe_protocol,
+)
 from inference.prompts import build_ffgpe_prompt, validate_ffgpe_prompt_type
-from inference.run_mt import _block_extractor, load_model_tokenizer
+from inference.run_inst_flash_gpe_mt import (
+    extract_post_edit_response as extract_inst_post_edit_response,
+)
+from inference.run_mt import load_model_tokenizer
 from inference.run_oss_flash_gpe_mt import extract_candidate_response
 from inference.run_oss_group_post_edit import extract_response as extract_flash_gpe_post_edit
 from inference.sft_mt_protocol import parse_fused_task_output
+
+
+def parse_ffgpe_response(
+    text: str,
+    max_candidates: int,
+    prompt_type: str,
+    protocol: str = "tag",
+) -> Optional[dict]:
+    validate_ffgpe_protocol(protocol)
+    exact_count = prompt_type in {"markdown", "fixed_4", "fixed_16"}
+
+    def candidate_parser(response: str):
+        return extract_candidate_response(
+            response,
+            max_candidates,
+            exact_count=exact_count,
+        )
+
+    if protocol == "simple":
+        return parse_simple_task_output(
+            text,
+            candidate_parser,
+            extract_inst_post_edit_response,
+        )
+    return parse_fused_task_output(
+        text,
+        candidate_parser,
+        extract_flash_gpe_post_edit,
+    )
 
 
 def _parse_ffgpe_response(
     text: str,
     max_candidates: int,
     prompt_type: str,
+    protocol: str = "tag",
 ) -> Optional[dict]:
-    exact_count = prompt_type in {"markdown", "fixed_4", "fixed_16"}
-    return parse_fused_task_output(
+    return parse_ffgpe_response(
         text,
-        lambda response: extract_candidate_response(
-            response,
-            max_candidates,
-            exact_count=exact_count,
-        ),
-        extract_flash_gpe_post_edit,
+        max_candidates,
+        prompt_type,
+        protocol,
     )
 
 
@@ -36,15 +69,15 @@ def func_call(
     top_p: float = 0.95,
     max_new_tokens: int = 8192,
     retry: int = 3,
+    protocol: str = "tag",
     use_chat_template: bool = True,
     model=None,
     tokenizer=None,
     **kwargs,
 ):
     """Run one-pass FFGPE generation and return final translations."""
-    from vllm import SamplingParams
-
     validate_ffgpe_prompt_type(prompt_type, max_candidates)
+    validate_ffgpe_protocol(protocol)
     if isinstance(src_langs, str):
         src_langs = [src_langs] * len(src_list)
     if isinstance(trg_langs, str):
@@ -53,6 +86,8 @@ def func_call(
         raise ValueError("src_list, src_langs, and trg_langs must have the same length")
     if retry < 0:
         raise ValueError("retry must be non-negative")
+
+    from vllm import SamplingParams
 
     if model is None or tokenizer is None:
         model, tokenizer = load_model_tokenizer(model_path, **kwargs)
@@ -100,8 +135,11 @@ def func_call(
             if not output.outputs:
                 continue
             raw_text = output.outputs[0].text
-            parsed = _parse_ffgpe_response(
-                raw_text, max_candidates, prompt_type
+            parsed = parse_ffgpe_response(
+                raw_text,
+                max_candidates,
+                prompt_type,
+                protocol,
             )
             raw_outputs[index] = raw_text
             parsed_outputs[index] = parsed

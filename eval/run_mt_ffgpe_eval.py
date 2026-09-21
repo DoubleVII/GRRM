@@ -8,6 +8,7 @@ import pandas as pd
 
 from utils.config import MT_TEST_DATA_META_INFO
 from utils.helpers import load_datasets_from_dir
+from inference.ffgpe_protocol import validate_ffgpe_protocol
 from inference.run_mt import load_model_tokenizer
 from inference.run_mt_ffgpe import func_call
 from eval.run_mt_eval import (
@@ -34,8 +35,10 @@ def main(
     save_results: bool = False,
     data_dir: Optional[str] = None,
     retry: int = 3,
+    protocol: str = "tag",
     **kwargs,
 ):
+    validate_ffgpe_protocol(protocol)
     data_ids = (data_id,) if isinstance(data_id, str) else tuple(data_id)
     if len(data_ids) == 1 and isinstance(data_ids[0], str) and "," in data_ids[0]:
         data_ids = tuple(x.strip() for x in data_ids[0].split(",") if x.strip())
@@ -62,6 +65,7 @@ def main(
         top_p=top_p,
         max_new_tokens=max_new_tokens,
         retry=retry,
+        protocol=protocol,
         model=model,
         tokenizer=tokenizer,
     )
@@ -101,6 +105,7 @@ def main(
     counts = output.get("candidate_counts", [])
     summary = {
         "method": "ffgpe",
+        "protocol": protocol,
         "candidate_count_mean": (sum(counts) / len(counts)) if counts else 0.0,
         "candidate_count_min": min(counts) if counts else 0,
         "candidate_count_max": max(counts) if counts else 0,
@@ -109,7 +114,7 @@ def main(
         "generation_failures": sum(x == "Translation Failed." for x in predictions),
     }
     print("\n=== FFGPE evaluation summary ===")
-    print(f"method: ffgpe | model: {model_name} | prompt_type: {prompt_type} | max_candidates: {max_candidates} | runs: {runs}")
+    print(f"method: ffgpe | model: {model_name} | protocol: {protocol} | prompt_type: {prompt_type} | max_candidates: {max_candidates} | runs: {runs}")
     print(
         "candidate_count: "
         f"mean={summary['candidate_count_mean']:.2f}, "
@@ -129,6 +134,7 @@ def main(
         payload = {
             "method": "ffgpe", "data_name": list(data_ids), "model_name": model_name,
             "model_path": model_path, "prompt_type": prompt_type,
+            "protocol": protocol,
             "max_candidates": max_candidates, "metrics": metric_results,
             "summary": summary, "items": [],
         }
@@ -142,7 +148,7 @@ def main(
                 "parser_valid": [output.get("parser_valid", [])[r * n_items + i] for r in range(runs)],
             })
         Path(f"{model_name}__ffgpe.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    log_results_to_wandb(metric_results, {"model_name": model_name, "model_path": model_path, "metrics": all_metrics, "method": "ffgpe", "prompt_type": prompt_type, "max_candidates": max_candidates}, metric_none)
+    log_results_to_wandb(metric_results, {"model_name": model_name, "model_path": model_path, "metrics": all_metrics, "method": "ffgpe", "protocol": protocol, "prompt_type": prompt_type, "max_candidates": max_candidates}, metric_none)
 
 
 if __name__ == "__main__":

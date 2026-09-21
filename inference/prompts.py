@@ -87,12 +87,12 @@ def build_ffgpe_prompt(
         if exact_count
         else f"as many as useful, up to {max_candidates}"
     )
-    return f"""Translate this text from {source_lang} to {target_lang}. First produce {count} meaningfully different complete translations, keeping each one faithful and natural. Then review those candidates, correct their errors, and produce the best final translation.
+    return f"""Translate this text from {source_lang} to {target_lang}. First produce {count} meaningfully different complete translations, keeping each one faithful and natural. Then review those candidates, correct their errors, combine and produce the best final translation.
 
-For the candidate section, output exactly consecutive Markdown headings `# Candidate 1` through `# Candidate {max_candidates}`, with one complete translation under each heading. Candidates may contain multiple lines. Do not use code fences or add unrelated headings.
+# Source
 
-Source:
-{source_text}"""
+{source_text}
+"""
 
 
 def get_task_prompt(prompt_format: str, add_example: bool = False):

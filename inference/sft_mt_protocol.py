@@ -2,7 +2,8 @@ import re
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from inference.prompts import build_ffgpe_prompt
+from inference.ffgpe_protocol import SIMPLE_PROTOCOL_SEPARATOR, _split_analysis_section
+from inference.prompts import build_ffgpe_prompt, build_ffgqm_prompt
 from utils.config import LANG_MAP, candidate_identifiers
 
 
@@ -23,6 +24,14 @@ class FusedSftOutput:
     candidate_response: str
     post_edit_thinking: str
     post_edit_response: str
+
+
+@dataclass(frozen=True)
+class FusedGqmSftOutput:
+    candidate_thinking: str
+    candidate_response: str
+    gqm_thinking: str
+    gqm_response: str
 
 
 _OUTPUT_PATTERN = re.compile(
@@ -147,6 +156,66 @@ def parse_fused_task_output(
     }
 
 
+def format_simple_ffgqm_output(
+    candidate_response: str,
+    gqm_response: str,
+) -> str:
+    responses = (candidate_response, gqm_response)
+    if any(not isinstance(value, str) or not value.strip() for value in responses):
+        raise ValueError("candidate and GQM responses must be non-empty strings")
+    return (
+        f"{candidate_response.strip()}\n\n"
+        f"{SIMPLE_PROTOCOL_SEPARATOR}\n\n"
+        "Now, rank and score the candidates.\n\n"
+        f"{gqm_response.strip()}"
+    )
+
+
+def parse_simple_ffgqm_output(text: Optional[str]) -> Optional[FusedGqmSftOutput]:
+    if not isinstance(text, str):
+        return None
+    text = text.replace("\r\n", "\n")
+    connector = "Now, rank and score the candidates."
+    matches = list(re.finditer(
+        rf"(?m)^[ \t]*{re.escape(SIMPLE_PROTOCOL_SEPARATOR)}[ \t]*\n{{2,}}"
+        rf"[ \t]*{re.escape(connector)}[ \t]*$",
+        text,
+    ))
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    before, after = text[:match.start()], text[match.end():]
+    if not before.endswith("\n\n") or not after.startswith("\n\n"):
+        return None
+    candidate = _split_analysis_section(before, r"^# Candidate 1[ \t]*$")
+    gqm = _split_analysis_section(after, r"^# Final Ranking[ \t]*$")
+    if candidate is None or gqm is None:
+        return None
+    return FusedGqmSftOutput(candidate[0], candidate[1], gqm[0], gqm[1])
+
+
+def parse_simple_gqm_task_output(
+    text: Optional[str],
+    candidate_parser: Callable[[str], object],
+    gqm_parser: Callable[[str], object],
+):
+    envelope = parse_simple_ffgqm_output(text)
+    if envelope is None:
+        return None
+    candidates = candidate_parser(envelope.candidate_response)
+    gqm = gqm_parser(envelope.gqm_response)
+    if candidates is None or gqm is None:
+        return None
+    return {
+        "candidate_thinking": envelope.candidate_thinking,
+        "candidate_response": envelope.candidate_response,
+        "candidates": candidates,
+        "gqm_thinking": envelope.gqm_thinking,
+        "gqm_response": envelope.gqm_response,
+        "gqm": gqm,
+    }
+
+
 def build_sft_direct_prompt(
     source_lang: str, target_lang: str, source_text: str
 ) -> str:
@@ -199,6 +268,48 @@ def build_sft_fused_flash_gpe_prompt(
         source_text,
         max_candidates=max_candidates,
         prompt_type="markdown" if exact_count else "adaptive",
+    )
+
+
+def build_sft_fused_flash_gqm_prompt(
+    source_lang: str,
+    target_lang: str,
+    source_text: str,
+    max_candidates: int = 4,
+) -> str:
+    return build_ffgqm_prompt(
+        source_lang,
+        target_lang,
+        source_text,
+        max_candidates=max_candidates,
+    )
+
+
+def build_sft_flash_gqm_candidate_prompt(
+    source_lang: str,
+    target_lang: str,
+    source_text: str,
+    max_candidates: int = 4,
+) -> str:
+    return build_sft_flash_gpe_candidate_prompt(
+        source_lang, target_lang, source_text, max_candidates, exact_count=True
+    )
+
+
+def build_sft_flash_gqm_prompt(
+    source_lang: str,
+    target_lang: str,
+    source_text: str,
+    candidates: list[str],
+) -> str:
+    from inference.inst_flash_gqm_prompts import build_gqm_prompt
+
+    return build_gqm_prompt(
+        source_lang,
+        target_lang,
+        source_text,
+        candidates,
+        explicit_analysis=True,
     )
 
 

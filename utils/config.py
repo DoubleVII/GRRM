@@ -1,3 +1,7 @@
+import json
+from pathlib import Path
+
+
 # --- Language Configuration ---
 VALID_LANGS = [
     "en",
@@ -15,26 +19,8 @@ VALID_LANGS = [
 TOWER_LANGS = ["en", "de", "fr", "nl", "it", "es", "pt", "ko", "ru", "zh"]
 OOD_LANGS = ["ru", "ja", "uk"]
 
-LANG_MAP = {
-    "en": "English",
-    "zh": "Chinese",
-    "de": "German",
-    "ru": "Russian",
-    "ko": "Korean",
-    "ja": "Japanese",
-    "fr": "French",
-    "es": "Spanish",
-    "pt": "Portuguese",
-    "it": "Italian",
-    "nl": "Dutch",
-    "th": "Thai",
-    "ro": "Romanian",
-    "ar": "Arabic",
-    "el": "Greek",
-    "vi": "Vietnamese",
-    "uk": "Ukrainian",
-}
-
+with (Path(__file__).parent / "language_map.json").open(encoding="utf-8") as file:
+    LANG_MAP = json.load(file)
 
 
 flores_langcode_map = {
@@ -331,6 +317,31 @@ MT_TEST_DATA_META_INFO = {
         "src_lang": "zh",
         "trg_lang": "en",
         "path": "parquet_data/test_data_mt/wmt23/wmt23_zh_en.parquet",
+    },
+    "ltb_v1_scarcity_high": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-scarcity/high_resource.parquet",
+    },
+    "ltb_v1_scarcity_medium": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-scarcity/medium_resource.parquet",
+    },
+    "ltb_v1_scarcity_low": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-scarcity/low_resource.parquet",
+    },
+    "ltb_v1_generalization_in_distribution": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-generalization/in_distribution.parquet",
+    },
+    "ltb_v1_generalization_out_of_distribution": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-generalization/out_of_distribution.parquet",
     },
 }
 

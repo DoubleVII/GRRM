@@ -24,7 +24,6 @@ from utils.config import MT_TEST_DATA_META_INFO
 from utils.helpers import (
     build_notes_list,
     load_datasets_from_dir as _load_datasets_from_dir,
-    split_metrics_by_notes,
 )
 
 
@@ -33,53 +32,23 @@ def log_gpe_results_to_wandb(
     config: Dict[str, Any],
     datasets_metric_none_counts: Optional[Dict[str, Dict[str, int]]] = None,
     datasets_metric_results: Optional[Dict[str, Dict[str, float]]] = None,
-    datasets_metrics_by_notes: Optional[Dict[str, Dict[str, dict]]] = None,
 ):
     project_name = "mt-gpe-eval"
     wandb.init(project=project_name, name=config["model_name"], config=config)
 
-    if datasets_metrics_by_notes is not None:
-        columns = ["data_id"]
+    columns = ["data_id"] + valid_metrics
+    rows: List[List[Any]] = []
+    for data_id, metric_dict in (datasets_metric_results or {}).items():
+        row: List[Any] = [data_id]
         for m in valid_metrics:
-            columns.extend([f"{m}/all", f"{m}/notes", f"{m}/no_notes"])
-        columns.extend(["notes_count", "no_notes_count"])
+            row.append(metric_dict.get(m, np.nan))
+        rows.append(row)
 
-        rows: List[List[Any]] = []
-        for data_id, metric_dict in datasets_metrics_by_notes.items():
-            row: List[Any] = [data_id]
-            for m in valid_metrics:
-                split = metric_dict.get(m, {})
-                row.append(split.get("all", {}).get("avg", np.nan))
-                row.append(split.get("notes", {}).get("avg", np.nan))
-                row.append(split.get("no_notes", {}).get("avg", np.nan))
-            first_split = next(iter(metric_dict.values()), {})
-            row.append(first_split.get("notes", {}).get("count", 0))
-            row.append(first_split.get("no_notes", {}).get("count", 0))
-            rows.append(row)
+    wandb.log({"metrics_by_dataset": wandb.Table(columns=columns, data=rows)})
 
-        wandb.log({"metrics_by_dataset": wandb.Table(columns=columns, data=rows)})
-
-        for data_id, metric_dict in datasets_metrics_by_notes.items():
-            for m, split in metric_dict.items():
-                for group in ("all", "notes", "no_notes"):
-                    wandb.run.summary[f"{data_id}/{m}/{group}"] = split.get(group, {}).get("avg", np.nan)
-            first_split = next(iter(metric_dict.values()), {})
-            wandb.run.summary[f"{data_id}/notes_count"] = first_split.get("notes", {}).get("count", 0)
-            wandb.run.summary[f"{data_id}/no_notes_count"] = first_split.get("no_notes", {}).get("count", 0)
-    else:
-        columns = ["data_id"] + valid_metrics
-        rows: List[List[Any]] = []
-        for data_id, metric_dict in (datasets_metric_results or {}).items():
-            row: List[Any] = [data_id]
-            for m in valid_metrics:
-                row.append(metric_dict.get(m, np.nan))
-            rows.append(row)
-
-        wandb.log({"metrics_by_dataset": wandb.Table(columns=columns, data=rows)})
-
-        for data_id, metric_dict in (datasets_metric_results or {}).items():
-            for m, val in metric_dict.items():
-                wandb.run.summary[f"{data_id}/{m}"] = val
+    for data_id, metric_dict in (datasets_metric_results or {}).items():
+        for m, val in metric_dict.items():
+            wandb.run.summary[f"{data_id}/{m}"] = val
 
     if datasets_metric_none_counts:
         for data_id, metric_none_counts in datasets_metric_none_counts.items():
@@ -113,16 +82,13 @@ def save_gpe_results_to_json(
     gpe_mode: str = "direct",
     gqm_prompt_type: Optional[str] = None,
     notes_list_per_item: Optional[list[Optional[str]]] = None,
-    use_notes_mask_per_item: Optional[list[bool]] = None,
-    difficulty_list_per_item: Optional[list] = None,
-    difficulty_filter: Optional[int] = None,
     gpe_extra_outputs_per_item: Optional[Dict[str, list[list[Any]]]] = None,
 ) -> Path:
     safe_model_name = _sanitize_filename_component(model_name)
     safe_dataset_name = _sanitize_filename_component(dataset_name)
     out_file = Path.cwd() / f"{safe_model_name}__gpe__{safe_dataset_name}.json"
 
-    include_notes = notes_list_per_item is not None and use_notes_mask_per_item is not None
+    include_notes = notes_list_per_item is not None
     n = len(df)
     items = []
     for i in range(n):
@@ -144,8 +110,6 @@ def save_gpe_results_to_json(
         }
         if include_notes:
             item["notes"] = notes_list_per_item[i]
-            item["use_notes"] = use_notes_mask_per_item[i]
-            item["difficulty"] = difficulty_list_per_item[i] if difficulty_list_per_item is not None else 0
         if gpe_extra_outputs_per_item:
             item["gpe_extra_outputs"] = {
                 key: values[i] for key, values in gpe_extra_outputs_per_item.items()
@@ -171,9 +135,6 @@ def save_gpe_results_to_json(
         "metrics": valid_metrics,
         "items": items,
     }
-    if include_notes:
-        json_payload["difficulty_filter"] = difficulty_filter
-
     with open(out_file, "w", encoding="utf-8") as f:
         json.dump(json_payload, f, ensure_ascii=False, indent=2)
 
@@ -195,12 +156,6 @@ def _parse_data_id(data_id) -> tuple[str, ...]:
     return data_id_list
 
 
-def _difficulty_list(df: pd.DataFrame) -> list:
-    if "difficulty" not in df.columns:
-        return [0] * len(df)
-    return df["difficulty"].tolist()
-
-
 def run_gpe_eval_core(
     data_id: tuple[str],
     model_path: str,
@@ -219,7 +174,6 @@ def run_gpe_eval_core(
     runs: int = 1,
     save_results: bool = False,
     use_notes: bool = False,
-    difficulty_filter: int = 0,
     gpe_mode: str = "direct",
     gqm_prompt_type: str = "ranking_score",
     **kwargs,
@@ -241,11 +195,9 @@ def run_gpe_eval_core(
     N = len(df_all)
 
     flat_notes_list = None
-    flat_use_notes_mask = None
     if use_notes:
-        flat_notes_list, flat_use_notes_mask = build_notes_list(df_all, difficulty_filter, runs)
-        notes_used = sum(flat_use_notes_mask[:N])
-        print(f"Total items: {N}, notes used: {notes_used}/{N} (difficulty_filter={difficulty_filter})")
+        flat_notes_list = build_notes_list(df_all, runs)
+        print(f"Total items: {N}")
     else:
         print(f"Total items: {N}")
 
@@ -336,9 +288,6 @@ def run_gpe_eval_core(
     oss_model_path = kwargs.get("oss_model_path")
 
     datasets_metric_results: Dict[str, Dict[str, float]] = {did: {} for did in data_id_list}
-    datasets_metrics_by_notes: Optional[Dict[str, Dict[str, dict]]] = (
-        {did: {} for did in data_id_list} if use_notes else None
-    )
     datasets_metric_none_counts: Dict[str, Dict[str, int]] = {did: {} for did in data_id_list}
     datasets_per_item_metric_avgs: Dict[str, Dict[str, list[Optional[float]]]] = {
         did: {} for did in data_id_list
@@ -349,20 +298,12 @@ def run_gpe_eval_core(
     seen_metrics = set()
 
     def add_metric(metric_name: str, scores_flat: list[float]):
-        if use_notes:
-            metric_split = split_metrics_by_notes(scores_flat, flat_use_notes_mask, boundaries, N, runs)
-            for did in data_id_list:
-                datasets_metrics_by_notes[did][metric_name] = metric_split[did]
-                datasets_metric_none_counts[did][metric_name] = metric_split[did]["all"]["none_count"]
-                datasets_per_item_metric_avgs[did][metric_name] = metric_split[did]["all"]["per_item_avgs"]
-                datasets_valid_metrics[did].append(metric_name)
-        else:
-            metric_results = _split_scores_by_data_id(scores_flat, boundaries, N, runs)
-            for did in data_id_list:
-                datasets_metric_results[did][metric_name] = metric_results[did]["avg"]
-                datasets_metric_none_counts[did][metric_name] = metric_results[did]["none_count"]
-                datasets_per_item_metric_avgs[did][metric_name] = metric_results[did]["per_item_avgs"]
-                datasets_valid_metrics[did].append(metric_name)
+        metric_results = _split_scores_by_data_id(scores_flat, boundaries, N, runs)
+        for did in data_id_list:
+            datasets_metric_results[did][metric_name] = metric_results[did]["avg"]
+            datasets_metric_none_counts[did][metric_name] = metric_results[did]["none_count"]
+            datasets_per_item_metric_avgs[did][metric_name] = metric_results[did]["per_item_avgs"]
+            datasets_valid_metrics[did].append(metric_name)
 
         if metric_name not in seen_metrics:
             seen_metrics.add(metric_name)
@@ -391,18 +332,9 @@ def run_gpe_eval_core(
     for did in data_id_list:
         print(f"\n=== {did} ===")
         for m in datasets_valid_metrics[did]:
-            if use_notes:
-                split = datasets_metrics_by_notes[did][m]
-                all_avg = split["all"]["avg"]
-                notes_avg = split["notes"]["avg"]
-                no_notes_avg = split["no_notes"]["avg"]
-                notes_cnt = split["notes"]["count"]
-                no_notes_cnt = split["no_notes"]["count"]
-                print(f"  {m}: all={all_avg:.4f} | notes({notes_cnt})={notes_avg:.4f} | no_notes({no_notes_cnt})={no_notes_avg:.4f}")
-            else:
-                avg = datasets_metric_results[did][m]
-                none_count = datasets_metric_none_counts[did][m]
-                print(f"  {m}: {avg:.4f} (none_count={none_count})")
+            avg = datasets_metric_results[did][m]
+            none_count = datasets_metric_none_counts[did][m]
+            print(f"  {m}: {avg:.4f} (none_count={none_count})")
 
     if save_results:
         for did, (start, end) in boundaries.items():
@@ -417,9 +349,6 @@ def run_gpe_eval_core(
             if use_notes:
                 save_kwargs = {
                     "notes_list_per_item": flat_notes_list[start:end],
-                    "use_notes_mask_per_item": flat_use_notes_mask[start:end],
-                    "difficulty_list_per_item": _difficulty_list(df_all.iloc[start:end]),
-                    "difficulty_filter": difficulty_filter,
                 }
 
             gpe_extra_outputs_per_item = None
@@ -497,13 +426,9 @@ def run_gpe_eval_core(
     }
     if gpe_mode in {"gqm_gpe", "gqmpe"}:
         wandb_config["gqm_prompt_type"] = gqm_prompt_type
-    if use_notes:
-        wandb_config["difficulty_filter"] = difficulty_filter
-
     log_gpe_results_to_wandb(
         valid_metrics=all_valid_metrics,
         config=wandb_config,
         datasets_metric_none_counts=datasets_metric_none_counts,
-        datasets_metric_results=None if use_notes else datasets_metric_results,
-        datasets_metrics_by_notes=datasets_metrics_by_notes if use_notes else None,
+        datasets_metric_results=datasets_metric_results,
     )

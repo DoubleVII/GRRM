@@ -10,8 +10,7 @@ from eval.run_mt_eval import (
     run_oss_SQM,
     save_results_to_json,
 )
-from inference.run_inst_mt import init_inst_model, run_translation_stage
-from inference.run_oss_diverse_mt import normalize_bool
+from inference.run_inst_diverse_mt import init_inst_model, run_pipeline, normalize_bool
 from utils.helpers import load_datasets_from_dir
 
 
@@ -31,12 +30,18 @@ def main(
     data_id: tuple[str],
     model_path: str,
     model_name: str,
-    temperature: float = 1.0,
+    divergent_temperature: float = 1.0,
+    final_temperature: float = 1.0,
+    min_candidates: int = 3,
+    max_candidates: int = 6,
+    polish: bool = True,
+    candidate_confidence: bool = False,
     top_p: float = 1.0,
     top_k: int = 0,
     presence_penalty: float = 0.0,
     repetition_penalty: float = 1.0,
-    max_new_tokens: int = 8192,
+    stage1_max_tokens: int = 8192,
+    final_max_tokens: int = 8192,
     metrics: list[str] = ["bleurt", "oss"],
     runs: int = 1,
     save_results: bool = False,
@@ -45,10 +50,13 @@ def main(
     enable_thinking: bool = False,
     **kwargs,
 ):
-    """Evaluate ordinary instruct translation with the standard MT metrics."""
+    """Evaluate JSON divergent/convergent instruct translation with the standard MT metrics."""
     if runs < 1:
         raise ValueError("runs must be at least 1")
     enable_thinking = normalize_bool(enable_thinking, "enable_thinking")
+    polish = normalize_bool(polish, "polish")
+    candidate_confidence = normalize_bool(candidate_confidence, "candidate_confidence")
+    prompt_label = f"inst-diverse-json.{'polish' if polish else 'no-polish'}.{'confidence' if candidate_confidence else 'no-confidence'}"
     data_ids = _parse_data_ids(data_id)
     if data_dir:
         frame, boundaries, per_id = load_datasets_from_dir(data_ids, data_dir)
@@ -58,21 +66,27 @@ def main(
     item_count = len(frame)
 
     engine = init_inst_model(model_path, **kwargs.get("mt_vllm_kwargs", {}))
-    inference = run_translation_stage(
+    inference = run_pipeline(
         frame["src_text"].tolist() * runs,
         frame["src_lang"].tolist() * runs,
         frame["trg_lang"].tolist() * runs,
         model=engine,
-        temperature=temperature,
+        divergent_temperature=divergent_temperature,
+        final_temperature=final_temperature,
+        min_candidates=min_candidates,
+        max_candidates=max_candidates,
+        polish=polish,
+        candidate_confidence=candidate_confidence,
         top_p=top_p,
         top_k=top_k,
         presence_penalty=presence_penalty,
         repetition_penalty=repetition_penalty,
-        max_tokens=max_new_tokens,
+        stage1_max_tokens=stage1_max_tokens,
+        final_max_tokens=final_max_tokens,
         retry=retry,
         enable_thinking=enable_thinking,
     )
-    raw_predictions = inference["translations"]
+    raw_predictions = inference["convergent"]["translations"]
     predictions = [value or "Translation Failed." for value in raw_predictions]
     expected = item_count * runs
     if len(predictions) != expected:
@@ -110,7 +124,7 @@ def main(
             valid_metrics[current_id].append(metric)
         evaluated_metrics.append(metric)
 
-    print(f"method=inst_mt | model={model_name} | runs={runs}")
+    print(f"method=inst_diverse_mt | model={model_name} | runs={runs}")
     print(f"generation_failures={sum(value is None for value in raw_predictions)}")
     for current_id in data_ids:
         print(f"\n=== {current_id} ===")
@@ -132,11 +146,11 @@ def main(
                 dataset_name=current_id,
                 model_name=model_name,
                 model_path=model_path,
-                temperature=temperature,
+                temperature=final_temperature,
                 top_p=top_p,
-                max_new_tokens=max_new_tokens,
+                max_new_tokens=final_max_tokens,
                 runs=runs,
-                prompt_type="inst-step-by-step",
+                prompt_type=prompt_label,
             )
 
     log_results_to_wandb(
@@ -145,16 +159,23 @@ def main(
             "dataset_names": data_ids,
             "model_path": model_path,
             "model_name": model_name,
-            "temperature": temperature,
+            "temperature": final_temperature,
+            "divergent_temperature": divergent_temperature,
+            "final_temperature": final_temperature,
+            "min_candidates": min_candidates,
+            "max_candidates": max_candidates,
+            "polish": polish,
+            "candidate_confidence": candidate_confidence,
+            "stage1_max_tokens": stage1_max_tokens,
             "top_p": top_p,
             "top_k": top_k,
             "presence_penalty": presence_penalty,
             "repetition_penalty": repetition_penalty,
-            "max_new_tokens": max_new_tokens,
+            "max_new_tokens": final_max_tokens,
             "runs": runs,
             "metrics": evaluated_metrics,
             "lang_pairs": lang_pairs,
-            "prompt_type": "inst-step-by-step",
+            "prompt_type": prompt_label,
             "data_dir": data_dir,
             "enable_thinking": enable_thinking,
             "retry": retry,

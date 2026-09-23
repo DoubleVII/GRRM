@@ -23,7 +23,6 @@ def main(
     ranking_max_new_tokens: Optional[int] = None,
     runs: int = 1,
     save_results: bool = False,
-    difficulty_filter: int = 0,
     **kwargs,
 ):
     return run_reranking_eval_core(
@@ -47,7 +46,6 @@ def main(
         runs=runs,
         save_results=save_results,
         use_notes=True,
-        difficulty_filter=difficulty_filter,
         **kwargs,
     )
 

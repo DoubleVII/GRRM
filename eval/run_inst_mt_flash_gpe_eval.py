@@ -3,6 +3,7 @@ from typing import Iterable, Optional
 from eval.run_mt_eval import (
     _load_datasets,
     _release_vllm_model,
+    _split_scores_by_data_id,
     log_results_to_wandb,
     run_bleurt_eval,
     run_oss_eval,
@@ -11,7 +12,7 @@ from eval.run_mt_eval import (
 )
 from inference.run_inst_flash_gpe_mt import init_inst_model, run_pipeline
 from inference.run_oss_diverse_mt import normalize_bool
-from utils.helpers import build_notes_list, load_datasets_from_dir, split_metrics_by_notes
+from utils.helpers import load_datasets_from_dir
 
 
 def _parse_data_ids(data_id) -> tuple[str, ...]:
@@ -47,7 +48,6 @@ def main(
     runs: int = 1,
     save_results: bool = False,
     data_dir: Optional[str] = None,
-    difficulty_filter: int = 0,
     retry: int = 3,
     enable_thinking: bool = True,
     **kwargs,
@@ -65,7 +65,6 @@ def main(
     else:
         frame, boundaries, lang_pairs, per_id = _load_datasets(data_ids)
     item_count = len(frame)
-    flat_notes, notes_mask = build_notes_list(frame, difficulty_filter, runs)
 
     flat_size = item_count * runs
     engine = init_inst_model(model_path, **kwargs.get("mt_vllm_kwargs", {}))
@@ -102,7 +101,6 @@ def main(
     metric_none = {value: {} for value in data_ids}
     per_item_metrics = {value: {} for value in data_ids}
     valid_metrics = {value: [] for value in data_ids}
-    metrics_by_notes = {value: {} for value in data_ids}
     evaluated_metrics = []
     unsupported = set(metrics) - {"bleurt", "oss"}
     if unsupported:
@@ -121,14 +119,11 @@ def main(
             scores = run_bleurt_eval(
                 frame, predictions, runs, kwargs.get("bleurt_model_path")
             )
-        split = split_metrics_by_notes(
-            scores, notes_mask, boundaries, item_count, runs
-        )
+        split = _split_scores_by_data_id(scores, boundaries, item_count, runs)
         for current_id in data_ids:
-            metric_results[current_id][metric] = split[current_id]["all"]["avg"]
-            metric_none[current_id][metric] = split[current_id]["all"]["none_count"]
-            per_item_metrics[current_id][metric] = split[current_id]["all"]["per_item_avgs"]
-            metrics_by_notes[current_id][metric] = split[current_id]
+            metric_results[current_id][metric] = split[current_id]["avg"]
+            metric_none[current_id][metric] = split[current_id]["none_count"]
+            per_item_metrics[current_id][metric] = split[current_id]["per_item_avgs"]
             valid_metrics[current_id].append(metric)
         evaluated_metrics.append(metric)
 
@@ -174,9 +169,6 @@ def main(
                 max_new_tokens=post_edit_max_new_tokens,
                 runs=runs,
                 prompt_type=f"inst-flash-gpe-n{candidate_count}",
-                difficulty_filter=difficulty_filter,
-                notes_list_per_item=flat_notes[start:end],
-                use_notes_mask_per_item=notes_mask[start:end],
             )
 
     log_results_to_wandb(
@@ -203,13 +195,11 @@ def main(
             "metrics": evaluated_metrics,
             "lang_pairs": lang_pairs,
             "prompt_type": "markdown",
-            "difficulty_filter": difficulty_filter,
             "data_dir": data_dir,
             "enable_thinking": enable_thinking,
             "retry": retry,
         },
         metric_none,
-        metrics_by_notes,
     )
 
 

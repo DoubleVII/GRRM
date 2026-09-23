@@ -108,10 +108,9 @@ def build_ffgqm_prompt(
         )
     source_lang = LANG_MAP.get(source_lang, source_lang)
     target_lang = LANG_MAP.get(target_lang, target_lang)
-    identifiers = ", ".join(candidate_identifiers[:max_candidates])
     return f"""Translate this text from {source_lang} to {target_lang}. First produce exactly {max_candidates} meaningfully different complete translations, keeping every candidate faithful and natural.
 
-Then review and compare the candidates. Rank every candidate by translation quality from best to worst, using `>` between different scores and `=` for ties. Assign each candidate an integer score from 0 to 10. Output the ranking and scores for exactly these candidates: {identifiers}. Do not produce a final rewritten translation; the highest-scoring candidate will be selected outside the model.
+Then review and compare the candidates. Rank every candidate by translation quality from best to worst, using `>` between different scores and `=` for ties. Assign each candidate an integer score from 0 to 10. Use capital letters A-Z to mark candidates.
 
 Source:
 {source_text}

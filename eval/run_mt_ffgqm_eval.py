@@ -7,6 +7,7 @@ from typing import Optional
 from utils.helpers import load_datasets_from_dir
 from inference.run_mt import load_model_tokenizer
 from inference.run_mt_ffgqm import func_call
+from eval.run_mt_ffgpe_eval import save_ffgpe_results_by_dataset
 from eval.run_mt_eval import (
     _load_datasets,
     _release_vllm_model,
@@ -133,6 +134,55 @@ def main(
             print(f"{metric}: {value:.6f} (none={metric_none[did][metric]})")
 
     if save_results:
+        extra_items = []
+        for index in range(n_items):
+            extra_items.append({
+                "candidates": [
+                    output["candidates"][run * n_items + index]
+                    for run in range(runs)
+                ],
+                "candidate_count": [
+                    output["candidate_counts"][run * n_items + index]
+                    for run in range(runs)
+                ],
+                "scores": [
+                    output["scores"][run * n_items + index]
+                    for run in range(runs)
+                ],
+                "selected_candidate_indices": [
+                    output["selected_candidate_indices"][run * n_items + index]
+                    for run in range(runs)
+                ],
+                "raw_output": [
+                    output["raw_outputs"][run * n_items + index]
+                    for run in range(runs)
+                ],
+                "parser_valid": [
+                    output["parser_valid"][run * n_items + index]
+                    for run in range(runs)
+                ],
+            })
+        save_ffgpe_results_by_dataset(
+            df=df,
+            boundaries=boundaries,
+            per_id=per_id,
+            data_ids=data_ids,
+            predictions=predictions,
+            runs=runs,
+            metric_results=metric_results,
+            per_item_metrics=per_item,
+            valid_metrics=valid_metrics,
+            model_name=model_name,
+            model_path=model_path,
+            prompt_type="fixed_4",
+            extra_items=extra_items,
+            metadata={
+                "method": "ffgqm",
+                "protocol": "simple",
+                "max_candidates": max_candidates,
+                "summary": summary,
+            },
+        )
         payload = {
             "method": "ffgqm",
             "data_name": list(data_ids),
@@ -145,10 +195,16 @@ def main(
             "items": [],
         }
         for index in range(n_items):
+            item_did = next(did for did, (start, end) in boundaries.items() if start <= index < end)
+            local_index = index - boundaries[item_did][0]
             payload["items"].append({
                 "source": df.iloc[index].src_text,
                 "reference": df.iloc[index].trg_text,
                 "predictions": [predictions[run * n_items + index] for run in range(runs)],
+                "metrics_avg": {
+                    metric: per_item[item_did][metric][local_index]
+                    for metric in valid_metrics[item_did]
+                },
                 "candidates": [output["candidates"][run * n_items + index] for run in range(runs)],
                 "scores": [output["scores"][run * n_items + index] for run in range(runs)],
                 "selected_candidate_indices": [output["selected_candidate_indices"][run * n_items + index] for run in range(runs)],

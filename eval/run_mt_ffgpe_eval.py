@@ -14,11 +14,75 @@ from inference.run_mt_ffgpe import func_call
 from eval.run_mt_eval import (
     _load_datasets,
     _release_vllm_model,
+    _sanitize_filename_component,
     log_results_to_wandb,
     run_bleurt_eval,
     run_oss_eval,
     run_oss_SQM,
 )
+
+
+def save_ffgpe_results_by_dataset(
+    *,
+    df,
+    boundaries,
+    per_id,
+    data_ids,
+    predictions,
+    runs,
+    metric_results,
+    per_item_metrics,
+    valid_metrics,
+    model_name,
+    model_path,
+    prompt_type,
+    extra_items=None,
+    metadata=None,
+):
+    """Save FFGPE results with the same per-dataset layout as MT evaluation."""
+    extra_items = extra_items or [{} for _ in range(len(df))]
+    metadata = metadata or {}
+    for did in data_ids:
+        start, end = boundaries[did]
+        frame = per_id[did]
+        items = []
+        for local_index, row in enumerate(frame.itertuples(index=False)):
+            global_index = start + local_index
+            item = {
+                "index": local_index,
+                "src_lang": str(row.src_lang),
+                "trg_lang": str(row.trg_lang),
+                "lang_pair": f"{row.src_lang}-{row.trg_lang}",
+                "src_text": row.src_text,
+                "ref_text": row.trg_text,
+                "predictions": [
+                    predictions[r * len(df) + global_index] for r in range(runs)
+                ],
+                "metrics_avg": {
+                    metric: per_item_metrics[did][metric][local_index]
+                    for metric in valid_metrics[did]
+                },
+                "notes": getattr(row, "notes", None),
+            }
+            item.update(extra_items[global_index])
+            items.append(item)
+
+        payload = {
+            **metadata,
+            "data_name": did,
+            "model_name": model_name,
+            "model_path": model_path,
+            "runs": runs,
+            "prompt_type": prompt_type,
+            "metrics": valid_metrics[did],
+            "metric_results": metric_results[did],
+            "items": items,
+        }
+        safe_model = _sanitize_filename_component(model_name)
+        safe_dataset = _sanitize_filename_component(did)
+        Path(f"{safe_model}__{safe_dataset}.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
 
 def main(
@@ -131,6 +195,46 @@ def main(
             none_count = metric_none[did].get(metric, 0)
             print(f"{metric}: {value:.6f} (none={none_count})")
     if save_results:
+        extra_items = []
+        for i in range(n_items):
+            extra_items.append({
+                "candidates": [
+                    output.get("candidates", [])[r * n_items + i]
+                    for r in range(runs)
+                ],
+                "candidate_count": [
+                    counts[r * n_items + i] for r in range(runs)
+                ],
+                "raw_output": [
+                    output.get("raw_outputs", [])[r * n_items + i]
+                    for r in range(runs)
+                ],
+                "parser_valid": [
+                    output.get("parser_valid", [])[r * n_items + i]
+                    for r in range(runs)
+                ],
+            })
+        save_ffgpe_results_by_dataset(
+            df=df,
+            boundaries=boundaries,
+            per_id=per_id,
+            data_ids=data_ids,
+            predictions=predictions,
+            runs=runs,
+            metric_results=metric_results,
+            per_item_metrics=per_item,
+            valid_metrics=valid_metrics,
+            model_name=model_name,
+            model_path=model_path,
+            prompt_type=prompt_type,
+            extra_items=extra_items,
+            metadata={
+                "method": "ffgpe",
+                "protocol": protocol,
+                "max_candidates": max_candidates,
+                "summary": summary,
+            },
+        )
         payload = {
             "method": "ffgpe", "data_name": list(data_ids), "model_name": model_name,
             "model_path": model_path, "prompt_type": prompt_type,
@@ -139,9 +243,15 @@ def main(
             "summary": summary, "items": [],
         }
         for i in range(n_items):
+            item_did = next(did for did, (start, end) in boundaries.items() if start <= i < end)
+            local_index = i - boundaries[item_did][0]
             payload["items"].append({
                 "source": df.iloc[i].src_text, "reference": df.iloc[i].trg_text,
                 "predictions": [predictions[r * n_items + i] for r in range(runs)],
+                "metrics_avg": {
+                    metric: per_item[item_did][metric][local_index]
+                    for metric in valid_metrics[item_did]
+                },
                 "candidates": [output.get("candidates", [])[r * n_items + i] for r in range(runs)],
                 "candidate_count": [counts[r * n_items + i] for r in range(runs)],
                 "raw_output": [output.get("raw_outputs", [])[r * n_items + i] for r in range(runs)],

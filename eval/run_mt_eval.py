@@ -458,6 +458,7 @@ def main(
     prompt_type: str = "codeblock-think",
     runs: int = 1,
     save_results: bool = False,
+    use_notes: bool = False,
     data_dir: Optional[str] = None,
     **kwargs,
 ):
@@ -481,6 +482,8 @@ def main(
         prompt_type: Type of prompt template. Defaults to "codeblock-think".
         runs: Number of inference runs per sample. Defaults to 1.
         save_results: Whether to save per-item results to JSON. Defaults to False.
+        use_notes: Whether to include dataset notes in the model prompt.
+            Defaults to False.
         **kwargs: Additional keyword arguments:
             - bleurt_model_path: Path to BLEURT model.
             - oss_model_path: Path to gpt-oss model.
@@ -508,8 +511,10 @@ def main(
         df_all, boundaries, lang_pairs, dfs_per_id = _load_datasets(data_id_list)
     N = len(df_all)
 
-    # Build notes list
+    # Keep notes available for result serialization, but only expose them to the
+    # evaluated model when explicitly requested.
     flat_notes_list = build_notes_list(df_all, runs)
+    inference_notes_list = flat_notes_list if use_notes else None
     print(f"Total items: {N}")
 
     # Stage 1: Inference — single batched call across all data_ids and runs
@@ -526,7 +531,7 @@ def main(
         max_new_tokens,
         prompt_type=prompt_type,
         runs=runs,
-        notes_list=flat_notes_list,
+        notes_list=inference_notes_list,
     )
 
     # Release MT model to free GPU memory
@@ -647,6 +652,7 @@ def main(
         "metrics": all_valid_metrics,
         "lang_pairs": lang_pairs,
         "prompt_type": prompt_type,
+        "use_notes": use_notes,
         "data_dir": data_dir,
     }
 

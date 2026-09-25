@@ -71,6 +71,26 @@ def extract_translation_response(response: str) -> Optional[dict[str, str]]:
     return {"analysis": analysis, "translation": translation}
 
 
+def extract_legacy_translation_response(response: str) -> Optional[dict[str, str]]:
+    """Parse responses produced with the pre-code-block instruct prompt."""
+    if not isinstance(response, str):
+        return None
+    analysis_marker = "# Step-by-step Analysis"
+    translation_marker = "# Final Translation"
+    if not response.startswith(analysis_marker):
+        return None
+    if response.count(analysis_marker) != 1 or response.count(translation_marker) != 1:
+        return None
+    marker_index = response.index(translation_marker)
+    analysis = response[len(analysis_marker):marker_index].strip()
+    translation = response[marker_index + len(translation_marker):].strip()
+    if not analysis or not translation:
+        return None
+    if "```" in analysis or "```" in translation or translation.startswith("# "):
+        return None
+    return {"analysis": analysis, "translation": translation}
+
+
 def _generate_with_retries(
     engine: InstructEngine,
     prompts: list[str],
@@ -161,18 +181,22 @@ def run_translation_stage(
     max_tokens: int = 8192,
     retry: int = 3,
     enable_thinking: bool = False,
+    prompt_version: str = "codeblock",
 ) -> dict:
+    if prompt_version not in {"legacy", "codeblock"}:
+        raise ValueError("prompt_version must be 'legacy' or 'codeblock'")
     src_langs, trg_langs = _normalize_languages(
         len(src_list), src_langs, trg_langs
     )
     prompts = [
-        build_translation_prompt(src_lang, trg_lang, source)
+        build_translation_prompt(src_lang, trg_lang, source, prompt_version)
         for source, src_lang, trg_lang in zip(src_list, src_langs, trg_langs)
     ]
     results = _generate_with_retries(
         model,
         prompts,
-        extract_translation_response,
+        (extract_legacy_translation_response
+         if prompt_version == "legacy" else extract_translation_response),
         temperature=temperature,
         top_p=top_p,
         top_k=top_k,
@@ -212,6 +236,7 @@ def main(
     max_tokens: int = 8192,
     retry: int = 3,
     enable_thinking: bool = False,
+    prompt_version: str = "codeblock",
     gpu_memory_utilization: float = 0.9,
     max_model_len: int = 32768,
 ):
@@ -243,6 +268,7 @@ def main(
         max_tokens=max_tokens,
         retry=retry,
         enable_thinking=enable_thinking,
+        prompt_version=prompt_version,
     )
     items = []
     for index, row in frame.iterrows():
@@ -271,6 +297,7 @@ def main(
             "repetition_penalty": repetition_penalty,
             "max_tokens": max_tokens,
             "retry": retry,
+            "prompt_version": prompt_version,
         },
         "items": items,
     }

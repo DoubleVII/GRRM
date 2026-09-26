@@ -82,6 +82,8 @@ def save_reranking_results_to_json(
     ranking_prompt_type: str,
     ranking_task_type: str,
     notes_list_per_item: Optional[list[Optional[str]]] = None,
+    translation_backend: str = "mt",
+    translation_options: Optional[Dict[str, Any]] = None,
 ) -> Path:
     safe_model_name = _sanitize_filename_component(model_name)
     safe_dataset_name = _sanitize_filename_component(dataset_name)
@@ -129,6 +131,8 @@ def save_reranking_results_to_json(
         "prompt_type": prompt_type,
         "ranking_prompt_type": ranking_prompt_type,
         "ranking_task_type": ranking_task_type,
+        "translation_backend": translation_backend,
+        "translation_options": translation_options or {},
         "metrics": valid_metrics,
         "items": items,
     }
@@ -174,8 +178,17 @@ def run_reranking_eval_core(
     runs: int = 1,
     save_results: bool = False,
     use_notes: bool = False,
+    translation_backend: str = "mt",
+    top_k: int = 0,
+    presence_penalty: float = 0.0,
+    repetition_penalty: float = 1.0,
+    retry: int = 3,
+    enable_thinking: bool = False,
+    prompt_version: str = "codeblock",
     **kwargs,
 ):
+    if runs < 1:
+        raise ValueError("runs must be at least 1")
     if ranking_task_type not in {"gqm", "gqmpe"}:
         raise ValueError("ranking_task_type must be one of {'gqm', 'gqmpe'}")
     if ranking_task_type == "gqmpe" and use_notes:
@@ -199,40 +212,85 @@ def run_reranking_eval_core(
     else:
         print(f"Total items: {N}")
 
-    mt_vllm_kwargs = kwargs.get("mt_vllm_kwargs", {})
-    model, tokenizer = load_model_tokenizer(model_path, **mt_vllm_kwargs)
-
     src_list = df_all["src_text"].tolist()
     src_langs = df_all["src_lang"].tolist()
     trg_langs = df_all["trg_lang"].tolist()
-
     flat_src = src_list * runs
     flat_src_langs = src_langs * runs
     flat_trg_langs = trg_langs * runs
 
     print(f"Running MT inference: {runs} runs x {N} items x {sampling_n} samples ...")
-    mt_output = run_mt.func_call(
-        model_path=model_path,
-        src_list=flat_src,
-        src_langs=flat_src_langs,
-        trg_langs=flat_trg_langs,
-        sampling_n=sampling_n,
-        temperature=temperature,
-        top_p=top_p,
-        max_new_tokens=max_new_tokens,
-        prompt_type=prompt_type,
-        model=model,
-        tokenizer=tokenizer,
-    )
+    if translation_backend not in {"mt", "inst"}:
+        raise ValueError("translation_backend must be one of {'mt', 'inst'}")
 
-    mt_responses = mt_output["responses"]
-    if sampling_n == 1:
-        mt_responses = [[r] for r in mt_responses]
+    if translation_backend == "mt":
+        mt_vllm_kwargs = kwargs.get("mt_vllm_kwargs", {})
+        model, tokenizer = load_model_tokenizer(model_path, **mt_vllm_kwargs)
+        flat_src = src_list * runs
+        flat_src_langs = src_langs * runs
+        flat_trg_langs = trg_langs * runs
+        mt_output = run_mt.func_call(
+            model_path=model_path,
+            src_list=flat_src,
+            src_langs=flat_src_langs,
+            trg_langs=flat_trg_langs,
+            sampling_n=sampling_n,
+            temperature=temperature,
+            top_p=top_p,
+            max_new_tokens=max_new_tokens,
+            prompt_type=prompt_type,
+            model=model,
+            tokenizer=tokenizer,
+        )
+        mt_responses = mt_output["responses"]
+        if sampling_n == 1:
+            mt_responses = [[r] for r in mt_responses]
+    else:
+        from inference.run_inst_mt import init_inst_model, run_translation_stage
 
-    if ranking_model_path == model_path:
+        if sampling_n < 1:
+            raise ValueError("sampling_n must be at least 1")
+        model = init_inst_model(model_path, **kwargs.get("mt_vllm_kwargs", {}))
+        # Keep candidates grouped as runs, then items, then samples.
+        repeated_src = []
+        repeated_src_langs = []
+        repeated_trg_langs = []
+        for _ in range(runs):
+            for source, source_lang, target_lang in zip(src_list, src_langs, trg_langs):
+                repeated_src.extend([source] * sampling_n)
+                repeated_src_langs.extend([source_lang] * sampling_n)
+                repeated_trg_langs.extend([target_lang] * sampling_n)
+        inst_output = run_translation_stage(
+            repeated_src,
+            repeated_src_langs,
+            repeated_trg_langs,
+            model=model,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            presence_penalty=presence_penalty,
+            repetition_penalty=repetition_penalty,
+            max_tokens=max_new_tokens,
+            retry=retry,
+            enable_thinking=enable_thinking,
+            prompt_version=prompt_version,
+        )
+        translations = [
+            value or "Translation Failed." for value in inst_output["translations"]
+        ]
+        expected = runs * N * sampling_n
+        if len(translations) != expected:
+            raise ValueError(f"Expected {expected} instruct translations, got {len(translations)}")
+        mt_responses = [
+            translations[offset : offset + sampling_n]
+            for offset in range(0, expected, sampling_n)
+        ]
+        tokenizer = None
+
+    if ranking_model_path == model_path and translation_backend == "mt":
         ranking_model, ranking_tokenizer = model, tokenizer
     else:
-        _release_vllm_model(model)
+        _release_vllm_model(model.model if translation_backend == "inst" else model)
         del model, tokenizer
         ranking_model, ranking_tokenizer = None, None
 
@@ -387,6 +445,19 @@ def run_reranking_eval_core(
                 prompt_type=prompt_type,
                 ranking_prompt_type=ranking_prompt_type,
                 ranking_task_type=ranking_task_type,
+                translation_backend=translation_backend,
+                translation_options=(
+                    {
+                        "top_k": top_k,
+                        "presence_penalty": presence_penalty,
+                        "repetition_penalty": repetition_penalty,
+                        "retry": retry,
+                        "enable_thinking": enable_thinking,
+                        "prompt_version": prompt_version,
+                    }
+                    if translation_backend == "inst"
+                    else None
+                ),
                 **save_kwargs,
             )
 
@@ -410,7 +481,19 @@ def run_reranking_eval_core(
         "ranking_task_type": ranking_task_type,
         "add_example": add_example,
         "data_dir": data_dir,
+        "translation_backend": translation_backend,
     }
+    if translation_backend == "inst":
+        wandb_config.update(
+            {
+                "top_k": top_k,
+                "presence_penalty": presence_penalty,
+                "repetition_penalty": repetition_penalty,
+                "retry": retry,
+                "enable_thinking": enable_thinking,
+                "prompt_version": prompt_version,
+            }
+        )
     log_reranking_results_to_wandb(
         valid_metrics=all_valid_metrics,
         config=wandb_config,

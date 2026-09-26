@@ -43,6 +43,7 @@ def main(
     data_dir: Optional[str] = None,
     retry: int = 3,
     enable_thinking: bool = False,
+    prompt_version: str = "codeblock",
     **kwargs,
 ):
     """Evaluate ordinary instruct translation with the standard MT metrics."""
@@ -71,6 +72,7 @@ def main(
         max_tokens=max_new_tokens,
         retry=retry,
         enable_thinking=enable_thinking,
+        prompt_version=prompt_version,
     )
     raw_predictions = inference["translations"]
     predictions = [value or "Translation Failed." for value in raw_predictions]
@@ -155,6 +157,7 @@ def main(
             "metrics": evaluated_metrics,
             "lang_pairs": lang_pairs,
             "prompt_type": "inst-step-by-step",
+            "prompt_version": prompt_version,
             "data_dir": data_dir,
             "enable_thinking": enable_thinking,
             "retry": retry,

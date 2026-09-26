@@ -7,6 +7,7 @@ prepared LTB reference and comment columns.
 """
 
 import json
+import logging
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -22,6 +23,7 @@ from utils.config import MT_TEST_DATA_META_INFO
 
 DEFAULT_INPUT_PATH = "/home/nfs06/yangs/data/hf/zouhar/last-translation-benchmark/data/v1.json"
 DEFAULT_OSS_MODEL_PATH = "openai/gpt-oss-120b"
+LOGGER = logging.getLogger(__name__)
 
 
 def _nonempty(value) -> bool:
@@ -98,7 +100,14 @@ def _translation_map(rows: list[dict], model_name: str) -> dict[int, str]:
             if item.get("model") == model_name
         ]
         if len(matches) > 1:
-            raise ValueError(f"LTB id {row['id']}: duplicate output for {model_name!r}")
+            LOGGER.warning(
+                "LTB id %s has %d outputs for model %r; keeping the first and "
+                "discarding %d subsequent output(s)",
+                row["id"],
+                len(matches),
+                model_name,
+                len(matches) - 1,
+            )
         if matches and _nonempty(matches[0].get("translation")):
             output[row["id"]] = matches[0]["translation"]
     return output

@@ -170,14 +170,20 @@ def build_evaluation_frames(
 def _score_frames(
     frames: dict[str, pd.DataFrame],
     metrics: list[str],
+    runs: int,
     bleurt_model_path: Optional[str],
     oss_model_path: str,
     oss_vllm_kwargs: Optional[dict] = None,
 ) -> dict[str, dict]:
+    if not isinstance(runs, int) or isinstance(runs, bool) or runs < 1:
+        raise ValueError(f"runs must be a positive integer, got {runs!r}")
     nonempty = [(data_id, frame) for data_id, frame in frames.items() if len(frame)]
     if not nonempty:
         raise ValueError("The selected model has no non-empty translations in the selected data_id(s)")
     combined = pd.concat([frame for _, frame in nonempty], ignore_index=True)
+    # The source model output is fixed; repeat it in run-major order so the
+    # stochastic evaluators score every item once per requested run.
+    mt_flat = combined["mt_text"].tolist() * runs
     boundaries = {}
     offset = 0
     for data_id, frame in nonempty:
@@ -193,8 +199,8 @@ def _score_frames(
         try:
             scores["oss"] = run_oss_eval(
                 combined,
-                combined["mt_text"].tolist(),
-                1,
+                mt_flat,
+                runs,
                 oss_model,
                 oss_model_path=oss_model_path,
             )
@@ -203,21 +209,26 @@ def _score_frames(
     if "bleurt" in metrics:
         scores["bleurt"] = run_bleurt_eval(
             combined,
-            combined["mt_text"].tolist(),
-            1,
+            mt_flat,
+            runs,
             bleurt_model_path=bleurt_model_path,
         )
 
     results = {data_id: {} for data_id, _ in nonempty}
     for metric, values in scores.items():
         for data_id, (start, end) in boundaries.items():
-            values_for_dataset = [value for value in values[start:end] if value is not None]
+            values_for_dataset = [
+                value
+                for run_index in range(runs)
+                for value in values[run_index * len(combined) + start : run_index * len(combined) + end]
+                if value is not None
+            ]
             results[data_id][metric] = (
                 sum(values_for_dataset) / len(values_for_dataset)
                 if values_for_dataset
                 else None
             )
-            results[data_id][f"{metric}_none_count"] = end - start - len(values_for_dataset)
+            results[data_id][f"{metric}_none_count"] = (end - start) * runs - len(values_for_dataset)
     return results
 
 
@@ -226,6 +237,7 @@ def main(
     data_id=None,
     input_path: str = DEFAULT_INPUT_PATH,
     metrics: list[str] = ("bleurt", "oss"),
+    runs: int = 1,
     bleurt_model_path: Optional[str] = None,
     oss_model_path: str = None,
     oss_vllm_kwargs: Optional[dict] = None,
@@ -273,6 +285,7 @@ def main(
     payload = {
         "model_name": model_name,
         "data_id": selected_data_ids,
+        "runs": runs,
         "metrics": metrics,
         "coverage_all_models": coverage,
         "coverage": coverage[model_name],
@@ -280,7 +293,7 @@ def main(
     }
     if not coverage_only:
         payload["results"] = _score_frames(
-            frames, metrics, bleurt_model_path, oss_model_path, oss_vllm_kwargs
+            frames, metrics, runs, bleurt_model_path, oss_model_path, oss_vllm_kwargs
         )
         for data_id, values in payload["results"].items():
             print(f"\n=== {data_id} ===")

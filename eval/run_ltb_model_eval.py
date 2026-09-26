@@ -124,7 +124,7 @@ def _paths_for_data_ids(data_ids: tuple[str, ...]) -> dict[str, Path]:
     paths = {}
     for data_id in data_ids:
         configured = Path(MT_TEST_DATA_META_INFO[data_id]["path"])
-        paths[data_id] = configured if configured.is_absolute() else REPO_ROOT / configured
+        paths[data_id] = configured
     return paths
 
 

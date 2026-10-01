@@ -22,14 +22,17 @@ def parse_scd_stage1_response(
 ):
     if not nonempty_text(response):
         return None
-    if prompt_type == "json":
+    if prompt_type in {"json", "compact_json"}:
         return validate_divergent_result(
             extract_json_object(response),
             candidate_confidence=candidate_confidence,
+            prompt_type=prompt_type,
         )
     if prompt_type == "codeblock":
         return extract_codeblock_response(response)
-    raise ValueError("SCD SFT collection supports prompt_type=json or codeblock")
+    raise ValueError(
+        "SCD SFT collection supports prompt_type=json, compact_json, or codeblock"
+    )
 
 
 def validate_scd_record(
@@ -86,7 +89,9 @@ def validate_gpe_record(
         candidate_responses, candidate_thinking, candidate_translations
     ):
         parsed = (
-            extract_final_translation(response) if nonempty_text(response) else None
+            extract_final_translation(response)
+            if nonempty_text(response)
+            else None
         )
         if not (
             nonempty_text(thinking)

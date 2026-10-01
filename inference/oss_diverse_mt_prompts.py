@@ -17,6 +17,8 @@ def build_divergent_prompt(
     candidate_confidence: bool = False,
     max_decision_points: int = 4,
 ) -> str:
+    if prompt_type == "compact_json" and candidate_confidence:
+        raise ValueError("candidate_confidence is not supported for compact_json")
     source_lang = _language_name(source_lang)
     target_lang = _language_name(target_lang)
     if prompt_type == "decision_points":
@@ -78,6 +80,10 @@ Units may overlap, and parent-child units are encouraged when they support explo
         unit_task = """Analyze the source, divide it into ordered, non-overlapping translation units, and propose diverse local translation candidates for every unit. A unit may be a clause, idiom, term, name, discourse marker, or other span that should be translated together."""
         coverage_task = """- Cover all lexical content in the source and preserve its order. Boundary punctuation may remain between units, but no words or meaning may be omitted."""
 
+    fewer_candidates_task = (
+        f"- Give fewer than {min_candidates} candidates only when there is truly no meaningful alternative"
+        + ("." if prompt_type == "compact_json" else "; briefly state why in the unit analysis.")
+    )
     shared_task = f"""You are performing the divergent first stage of a translation task from {source_lang} to {target_lang}.
 
 {unit_task}
@@ -86,7 +92,7 @@ The purpose of this stage is exploration, not selection:
 {coverage_task}
 - Normally give {min_candidates} to {max_candidates} genuinely distinct candidates per unit. Explore plausible differences in sense, register, syntax, idiom handling, terminology, and target-language naturalness.
 - Do not create superficial variants that differ only in punctuation or one interchangeable function word.
-- Give fewer than {min_candidates} candidates only when there is truly no meaningful alternative; briefly state why in the unit analysis.
+{fewer_candidates_task}
 - A candidate must translate only its own source span, not the entire source.
 - Do not choose or compose a final translation in this stage.
 """
@@ -124,9 +130,28 @@ Output format requirements:
 
 {codeblock_source_section}"""
 
+    if prompt_type == "compact_json":
+        return f"""{shared_task}
+
+Return only one valid JSON object. Do not use Markdown fences or add text before or after it. Follow this schema:
+{{
+  "segments": [
+    {{
+      "segment_id": 1,
+      "source_span": "an exact contiguous lexical span copied from the source (boundary punctuation may be excluded)",
+      "candidates": ["local {target_lang} translation"]
+    }}
+  ]
+}}
+
+Source text:
+<source>
+{source_text}
+</source>"""
+
     if prompt_type not in {"json", "semantic_units"}:
         raise ValueError(
-            "prompt_type must be one of: json, codeblock, semantic_units, "
+            "prompt_type must be one of: json, compact_json, codeblock, semantic_units, "
             "decision_points"
         )
 
@@ -168,6 +193,8 @@ def build_convergent_prompt(
     candidate_confidence: bool = False,
     prompt_type: str = "json",
 ) -> str:
+    if prompt_type == "compact_json" and candidate_confidence:
+        raise ValueError("candidate_confidence is not supported for compact_json")
     source_lang = _language_name(source_lang)
     target_lang = _language_name(target_lang)
     if isinstance(divergent_result, dict):
@@ -213,9 +240,9 @@ Requirements:
 </decision_point_analysis>
 
 <final_translation>...</final_translation>"""
-    if prompt_type not in {"json", "codeblock", "semantic_units"}:
+    if prompt_type not in {"json", "compact_json", "codeblock", "semantic_units"}:
         raise ValueError(
-            "prompt_type must be one of: json, codeblock, semantic_units, "
+            "prompt_type must be one of: json, compact_json, codeblock, semantic_units, "
             "decision_points"
         )
     confidence_requirement = ""

@@ -19,8 +19,6 @@ def main(
     retry: int = 6,
     model_path: str = "gpt-oss-20b",
     reasoning_effort: str = None,
-    prompt_format: str = "score",
-    add_example: bool = True,
 ):
     assert output_path.endswith(".parquet")
 
@@ -62,8 +60,6 @@ def main(
             retry=retry,
             model_path=model_path,
             reasoning_effort=reasoning_effort,
-            prompt_format=prompt_format,
-            add_example=add_example,
         )
 
         for j, i in enumerate(active_indices):

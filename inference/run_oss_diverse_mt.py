@@ -86,9 +86,14 @@ def extract_codeblock_response(text: str) -> Optional[str]:
 
 
 def validate_divergent_result(
-    value: Optional[dict], candidate_confidence: bool = False
+    value: Optional[dict], candidate_confidence: bool = False, *, prompt_type: str = "json"
 ) -> Optional[dict]:
-    if not isinstance(value, dict) or not isinstance(value.get("source_analysis"), str):
+    compact = prompt_type == "compact_json"
+    if compact and candidate_confidence:
+        raise ValueError("candidate_confidence is not supported for compact_json")
+    if not isinstance(value, dict):
+        return None
+    if not compact and not isinstance(value.get("source_analysis"), str):
         return None
     segments = value.get("segments")
     if not isinstance(segments, list) or not segments:
@@ -100,12 +105,16 @@ def validate_divergent_result(
             return None
         if not isinstance(segment.get("source_span"), str) or not segment["source_span"].strip():
             return None
-        if not isinstance(segment.get("analysis"), str):
+        if not compact and not isinstance(segment.get("analysis"), str):
             return None
         candidates = segment.get("candidates")
         if not isinstance(candidates, list) or not candidates:
             return None
         for candidate in candidates:
+            if compact:
+                if not isinstance(candidate, str) or not candidate.strip():
+                    return None
+                continue
             if not isinstance(candidate, dict):
                 return None
             if not isinstance(candidate.get("translation"), str) or not candidate["translation"].strip():
@@ -316,14 +325,16 @@ def run_divergent_stage(
     if not (1 <= min_candidates <= max_candidates):
         raise ValueError("Expected 1 <= min_candidates <= max_candidates")
     if prompt_type not in {
-        "json", "codeblock", "semantic_units", "decision_points"
+        "json", "compact_json", "codeblock", "semantic_units", "decision_points"
     }:
         raise ValueError(
-            "prompt_type must be one of: json, codeblock, semantic_units, "
+            "prompt_type must be one of: json, compact_json, codeblock, semantic_units, "
             "decision_points"
         )
     if max_decision_points < 0:
         raise ValueError("max_decision_points must be at least 0")
+    if prompt_type == "compact_json" and candidate_confidence:
+        raise ValueError("candidate_confidence is not supported for compact_json")
     if prompt_type == "decision_points" and candidate_confidence:
         raise ValueError(
             "candidate_confidence is not supported for decision_points"
@@ -343,11 +354,12 @@ def run_divergent_stage(
         )
         for source, sl, tl in zip(src_list, src_langs, trg_langs)
     ]
-    if prompt_type in {"json", "semantic_units"}:
+    if prompt_type in {"json", "compact_json", "semantic_units"}:
         parser = (
             lambda text: validate_divergent_result(
                 extract_json_object(text),
                 candidate_confidence=candidate_confidence,
+                prompt_type=prompt_type,
             )
         )
     elif prompt_type == "decision_points":
@@ -536,12 +548,14 @@ def main(
         candidate_confidence, "candidate_confidence"
     )
     if prompt_type not in {
-        "json", "codeblock", "semantic_units", "decision_points"
+        "json", "compact_json", "codeblock", "semantic_units", "decision_points"
     }:
         raise ValueError(
-            "prompt_type must be one of: json, codeblock, semantic_units, "
+            "prompt_type must be one of: json, compact_json, codeblock, semantic_units, "
             "decision_points"
         )
+    if prompt_type == "compact_json" and candidate_confidence:
+        raise ValueError("candidate_confidence is not supported for compact_json")
     if prompt_type == "decision_points" and candidate_confidence:
         raise ValueError(
             "candidate_confidence is not supported for decision_points"

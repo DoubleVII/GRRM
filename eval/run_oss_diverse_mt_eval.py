@@ -159,7 +159,10 @@ def _diversity_stats(
                 for right in spans[:index]
             ))
         for segment in segments:
-            candidates = [candidate["translation"].strip() for candidate in segment["candidates"]]
+            candidates = [
+                (candidate if prompt_type == "compact_json" else candidate["translation"]).strip()
+                for candidate in segment["candidates"]
+            ]
             candidate_counts.append(len(candidates))
             normalized = {candidate.casefold() for candidate in candidates}
             duplicate_counts += len(candidates) - len(normalized)
@@ -179,17 +182,17 @@ def _diversity_stats(
         ]),
         "mean_segments_per_item": (
             _mean(segment_counts)
-            if prompt_type in {"json", "semantic_units"}
+            if prompt_type in {"json", "compact_json", "semantic_units"}
             else None
         ),
         "mean_candidates_per_segment": (
             _mean(candidate_counts)
-            if prompt_type in {"json", "semantic_units"}
+            if prompt_type in {"json", "compact_json", "semantic_units"}
             else None
         ),
         "segments_below_three_candidates": (
             sum(count < 3 for count in candidate_counts)
-            if prompt_type in {"json", "semantic_units"}
+            if prompt_type in {"json", "compact_json", "semantic_units"}
             else None
         ),
         "mean_containment_overlaps_per_item": (
@@ -199,7 +202,7 @@ def _diversity_stats(
         ),
         "exact_duplicate_candidate_rate": (
             duplicate_counts / total_candidates
-            if prompt_type in {"json", "semantic_units", "decision_points"}
+            if prompt_type in {"json", "compact_json", "semantic_units", "decision_points"}
             and total_candidates
             else None
         ),
@@ -338,12 +341,14 @@ def main(
         candidate_confidence, "candidate_confidence"
     )
     if prompt_type not in {
-        "json", "codeblock", "semantic_units", "decision_points"
+        "json", "compact_json", "codeblock", "semantic_units", "decision_points"
     }:
         raise ValueError(
-            "prompt_type must be one of: json, codeblock, semantic_units, "
+            "prompt_type must be one of: json, compact_json, codeblock, semantic_units, "
             "decision_points"
         )
+    if prompt_type == "compact_json" and candidate_confidence:
+        raise ValueError("candidate_confidence is not supported for compact_json")
     if prompt_type == "decision_points" and candidate_confidence:
         raise ValueError(
             "candidate_confidence is not supported for decision_points"

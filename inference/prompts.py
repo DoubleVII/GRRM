@@ -25,6 +25,26 @@ Source text:
 {candidate_prompts}{reference_prompt}{notes_prompt}"""
 
 
+OSS_GQM_PROMPT_TEMPLATE = """Given a source text in {source_lang} and multiple translation candidates in {target_lang}. Perform a step by step analysis and comparison of the translation quality for the candidates. Finally, score every candidate with an integer from 0 to 10.
+
+{analysis_instruction}
+The final output must end with one JSON object containing exactly one score for each candidate. Use candidate identifiers as keys and integer scores from 0 to 10 as values. Do not include any other keys. The JSON object may be wrapped in a markdown code block, but do not put explanatory text after it.
+Example JSON schema:
+```json
+{{
+  "A": 8,
+  "B": 7
+}}
+```
+
+Source text:
+```
+{source_text}
+```
+
+{candidate_prompts}"""
+
+
 notes_prompt_template = """
 
 You may refer to the following notes if necessary.
@@ -185,6 +205,38 @@ def get_GQM_prompt(
         candidate_prompts=candidate_prompts,
         reference_prompt=reference_prompt,
         notes_prompt=notes_prompt,
+    )
+
+
+def get_oss_GQM_prompt(
+    source_lang,
+    target_lang,
+    source_text,
+    mt_texts,
+    explicit_analysis: bool = True,
+):
+    """Build the JSON-scored prompt used by the OSS GQM evaluator."""
+    source_lang = LANG_MAP.get(source_lang, source_lang)
+    target_lang = LANG_MAP.get(target_lang, target_lang)
+    if len(mt_texts) == 1:
+        raise ValueError("Only support multiple candidates.")
+    if len(mt_texts) > len(candidate_identifiers):
+        raise ValueError(f"Only support {len(candidate_identifiers)} candidates.")
+
+    candidate_prompts = "".join(
+        candidate_prompt.format(candidate_identifiers[i], mt_text)
+        for i, mt_text in enumerate(mt_texts)
+    )
+    if explicit_analysis:
+        analysis_instruction = "Output your analysis and comparison before the final JSON object."
+    else:
+        analysis_instruction = "Output only the final JSON object and no analysis."
+    return OSS_GQM_PROMPT_TEMPLATE.format(
+        source_lang=source_lang,
+        target_lang=target_lang,
+        analysis_instruction=analysis_instruction,
+        source_text=source_text,
+        candidate_prompts=candidate_prompts,
     )
 
 
@@ -754,7 +806,7 @@ if __name__ == "__main__":
 
 
 
-teacher_GQM_prompt_template = """You are given a source text in {source_lang}, multiple {target_lang} translation candidates, and a set of Notes. Your task is to evaluate the translation quality of all candidates step by step, compare them, and then rank and score them.
+oss_GQM_with_notes_prompt_template = """You are given a source text in {source_lang}, multiple {target_lang} translation candidates, and a set of Notes. Your task is to evaluate the translation quality of all candidates step by step, compare them, and then score them.
 
 Important instructions:
 1. Treat the Notes as an important and authoritative reference for evaluation.
@@ -779,11 +831,11 @@ Output format:
 ### Conclusion
 [Overall comparison and final judgment, explicitly referring to consistency with the Notes as one of the ranking reasons]
 
-### Final Ranking
-[Output on a single line in descending order, e.g. `B > A = D > C`]
-
 ### Scores
-[Output on a single line in descending order, e.g. `B: 9, A: 7, D: 7, C: 2`]
+[Output a JSON object with exactly one integer score from 0 to 10 for each candidate, e.g.]
+```json
+{{"A": 8, "B": 7, "C": 6}}
+```
 
 ---
 
@@ -801,7 +853,7 @@ Notes:
 """
 
 
-def get_teacher_GQM_with_notes_prompt(
+def get_oss_GQM_with_notes_prompt(
     source_lang,
     target_lang,
     source_text,
@@ -824,7 +876,7 @@ def get_teacher_GQM_with_notes_prompt(
         for i in range(len(mt_texts))
     )
 
-    return teacher_GQM_prompt_template.format(
+    return oss_GQM_with_notes_prompt_template.format(
         source_lang=source_lang,
         target_lang=target_lang,
         source_text=source_text,

@@ -1,107 +1,22 @@
 from typing import Union
-import re
 import warnings
-from tqdm import tqdm
 from openai_harmony import (
     HarmonyEncoding,
-    HarmonyEncodingName,
-    load_harmony_encoding,
     Conversation,
     Message,
     Role,
     SystemContent,
     ReasoningEffort,
 )
-from utils.config import LANG_MAP, candidate_identifiers
-from utils.helpers import find_ints_in_string, parse_score_text
+from utils.helpers import parse_oss_gqm_response
+from inference.prompts import get_oss_GQM_prompt
 from inference.run_oss_SQM import init_oss_model, load_encoding
 
 
-prompt_template = """Given a source text in {} and multiple translation candidates in {}. Perform a step by step analysis and comparison of the translation quality for the candidates. Finally, scoring the candidates with integer scores on a scale from 0 to 10. Output your analysis and comparison first and output the scores in the end line (e.g. `{}`).
-
-Source text:
-```
-{}
-```
-
-{}"""
-
-
-prompt_template_no_analysis = """Given a source text in {} and multiple translation candidates in {}. Scoring the candidates with integer scores on a scale from 0 to 10 based on the translation quality. Output the scores in the end line (e.g. `{}`).
-
-Source text:
-```
-{}
-```
-
-{}"""
-
-candidate_prompt = """Translation {}:
-```
-{}
-```
-"""
-
-
-def get_prompt(
-    source_lang, target_lang, source_text, mt_texts, explicit_analysis: bool = True
+def extract_response(
+    response: str, expected_score_num: int, explicit_analysis: bool = True
 ):
-    if len(source_lang) == 2:
-        source_lang = LANG_MAP[source_lang]
-    if len(target_lang) == 2:
-        target_lang = LANG_MAP[target_lang]
-    if len(mt_texts) == 1:
-        raise ValueError(f"Only support multiple candidates.")
-    if len(mt_texts) > len(candidate_identifiers):
-        raise ValueError(f"Only support {len(candidate_identifiers)} candidates.")
-
-    format_example = ",".join(
-        [f"{candidate_identifiers[i]}: 0-10" for i in range(len(mt_texts))]
-    )
-    candidate_prompts = "".join(
-        [
-            candidate_prompt.format(candidate_identifiers[i], mt_texts[i])
-            for i in range(len(mt_texts))
-        ]
-    )
-    if explicit_analysis:
-        return prompt_template.format(
-            source_lang, target_lang, format_example, source_text, candidate_prompts
-        )
-    else:
-        return prompt_template_no_analysis.format(
-            source_lang, target_lang, format_example, source_text, candidate_prompts
-        )
-
-
-
-def extract_response(response: str, expected_score_num: int, explicit_analysis: bool = True):
-    response = response.strip()
-    last_line_index = response.rfind("\n")
-    if last_line_index == -1:
-        if explicit_analysis:
-            print("only score line in response")
-            return None
-        else:
-            last_line_index = 0
-            score_line = response
-    else:
-        score_line = response[last_line_index + 1 :].strip()
-    
-    if score_line.startswith("**") and score_line.endswith("**"):
-        score_line = score_line[2:-2]
-
-    scores = parse_score_text(score_line)
-    if scores is None:
-        print(f"invalid score line: {score_line}")
-        return None
-    for i in range(expected_score_num):
-        if candidate_identifiers[i] not in scores:
-            print(f"missing score for {candidate_identifiers[i]} in {score_line}")
-            return None
-    scores = [scores[candidate_identifiers[i]] for i in range(expected_score_num)]
-    
-    return {"analysis": response[:last_line_index].strip(), "scores": scores}
+    return parse_oss_gqm_response(response, expected_score_num)
 
 
 def prepare_vllm_inputs(
@@ -127,7 +42,7 @@ def prepare_vllm_inputs(
     for src_text, mt_texts, src_lang, trg_lang in zip(
         src_list, mt_list, src_langs, trg_langs
     ):
-        prompt = get_prompt(
+        prompt = get_oss_GQM_prompt(
             src_lang, trg_lang, src_text, mt_texts, explicit_analysis=explicit_analysis
         )
         convo = Conversation.from_messages(
@@ -195,9 +110,11 @@ def func_call(
     temperature: float = 0.4,
     top_p: float = 0.7,
     retry: int = 6,
-    model: str = "gpt-oss-20b",
+    model=None,
+    model_path: str = "gpt-oss-20b",
     reasoning_effort: str = None,
     explicit_analysis: bool = True,
+    max_new_tokens: int = 8192,
 ):
     from vllm import LLM, SamplingParams
 
@@ -211,12 +128,20 @@ def func_call(
     out_data["scores"] = []
     out_data["analysis"] = []
     out_data["thinking"] = []
-    llm = init_oss_model(model)
+    out_data["response"] = []
+    if model is None:
+        llm = init_oss_model(model_path)
+    elif isinstance(model, str):
+        # Preserve compatibility with existing callers that pass a model path
+        # through the old `model` argument.
+        llm = init_oss_model(model)
+    else:
+        llm = model
     encoding = load_encoding()
     stop_token_ids = encoding.stop_tokens_for_assistant_actions()
 
     sampling_params = SamplingParams(
-        max_tokens=8192,
+        max_tokens=max_new_tokens,
         temperature=temperature,
         top_p=top_p,
         stop_token_ids=stop_token_ids,
@@ -259,10 +184,16 @@ def func_call(
             warnings.warn(
                 f"Evaluation failed, src_text: {src_list[i]}, mt_text: {mt_list[i]}"
             )
-            res = {"analysis": None, "scores": None, "thinking": None}
+            res = {
+                "analysis": None,
+                "scores": None,
+                "thinking": None,
+                "response": None,
+            }
         out_data["scores"].append(res["scores"])
         out_data["analysis"].append(res["analysis"])
         out_data["thinking"].append(res["thinking"])
+        out_data["response"].append(res["response"])
     return out_data
 
 

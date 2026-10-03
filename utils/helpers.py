@@ -1,8 +1,67 @@
 import os
+import json
 import numpy as np
+import pandas as pd
 import re
 from pathlib import Path
 from typing import Optional, Dict, List
+
+
+def parse_oss_gqm_response(response: str, expected_score_num: int) -> Optional[dict]:
+    """Parse the trailing JSON score object from an OSS GQM response."""
+    if not isinstance(response, str) or expected_score_num < 2:
+        return None
+    text = response.strip()
+    if not text:
+        return None
+
+    json_text = text
+    analysis_prefix = ""
+    if text.endswith("```"):
+        closing = len(text) - 3
+        opening = text.rfind("```", 0, closing)
+        if opening < 0:
+            return None
+        analysis_prefix = text[:opening].strip()
+        json_text = text[opening + 3 : closing].strip()
+        first_line, separator, remainder = json_text.partition("\n")
+        if first_line.strip().lower() == "json":
+            json_text = remainder.strip() if separator else ""
+
+    decoder = json.JSONDecoder(object_pairs_hook=list)
+    start = json_text.rfind("{")
+    if start < 0:
+        return None
+    try:
+        parsed, end = decoder.raw_decode(json_text[start:])
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if json_text[start + end :].strip() or not isinstance(parsed, list):
+        return None
+
+    expected = [chr(ord("A") + i) for i in range(expected_score_num)]
+    keys = [key for key, _ in parsed]
+    if keys != list(dict.fromkeys(keys)) or set(keys) != set(expected):
+        return None
+    values = dict(parsed)
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= 10
+        for value in values.values()
+    ):
+        return None
+    return {
+        "analysis": analysis_prefix or json_text[:start].strip(),
+        "scores": [values[key] for key in expected],
+    }
+
+
+def _cast_string_columns(df: pd.DataFrame) -> pd.DataFrame:
+    for column in ["data_source", "ability"]:
+        if column in df.columns:
+            df[column] = df[column].astype("object")
+    return df
 
 
 def get_auto_tp_size() -> int:

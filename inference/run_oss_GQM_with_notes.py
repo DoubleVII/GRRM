@@ -10,17 +10,18 @@ from openai_harmony import (
 )
 from inference.run_oss_SQM import init_oss_model, load_encoding
 from inference.run_oss_GQM import extract_response
-from inference.prompts import get_GQM_prompt, get_teacher_GQM_with_notes_prompt
+from inference.prompts import get_oss_GQM_with_notes_prompt
 
 
 def post_process_analysis(text: str) -> Optional[str]:
     """
-    remove "### Final Ranking" and following lines
+    Remove legacy ranking output from the analysis when present.
     """
-    if "### Final Ranking" not in text:
+    if not isinstance(text, str) or not text.strip():
         return None
-    ranking_start = text.find("### Final Ranking")
-    return text[:ranking_start]
+    if "### Final Ranking" in text:
+        text = text[:text.find("### Final Ranking")]
+    return text.strip() or None
 
 def prepare_vllm_inputs(
     src_list: list[str],
@@ -29,8 +30,6 @@ def prepare_vllm_inputs(
     src_langs: list[str],
     trg_langs: list[str],
     encoding: HarmonyEncoding,
-    prompt_format: str = "score",
-    add_example: bool = True,
     reasoning_effort: str = None,
 ):
     inputs = []
@@ -47,8 +46,8 @@ def prepare_vllm_inputs(
     for src_text, mt_texts, notes, src_lang, trg_lang in zip(
         src_list, mt_list, notes_list, src_langs, trg_langs
     ):
-        prompt = get_teacher_GQM_with_notes_prompt(
-            src_lang, trg_lang, src_text, mt_texts, prompt_format=prompt_format, add_example=add_example, notes=notes,
+        prompt = get_oss_GQM_with_notes_prompt(
+            src_lang, trg_lang, src_text, mt_texts, notes=notes,
         )
         convo = Conversation.from_messages([
             Message.from_role_and_content(Role.SYSTEM, system_content),
@@ -117,8 +116,6 @@ def func_call(
     model=None,
     model_path: str = "gpt-oss-20b",
     reasoning_effort: str = None,
-    prompt_format: str = "score",
-    add_example: bool = True,
 ):
     from vllm import SamplingParams
 
@@ -149,7 +146,7 @@ def func_call(
 
     vllm_inputs = prepare_vllm_inputs(
         src_list, mt_list, notes_list, src_langs, trg_langs,
-        encoding, prompt_format, add_example, reasoning_effort,
+        encoding, reasoning_effort,
     )
     mt_count = [len(mt_texts) for mt_texts in mt_list]
     n = len(src_list)

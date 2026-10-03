@@ -43,12 +43,14 @@ def main(
     """Collect parser-validated two-stage SCD supervision from gpt-oss."""
     if not output_path.endswith(".parquet"):
         raise ValueError("output_path must end with .parquet")
-    if prompt_type not in {"json", "codeblock"}:
-        raise ValueError("prompt_type must be json or codeblock")
+    if prompt_type not in {"json", "compact_json", "codeblock"}:
+        raise ValueError("prompt_type must be json, compact_json, or codeblock")
     polish = normalize_bool(polish, "polish")
     candidate_confidence = normalize_bool(
         candidate_confidence, "candidate_confidence"
     )
+    if prompt_type == "compact_json" and candidate_confidence:
+        raise ValueError("candidate_confidence is not supported for compact_json")
 
     frame = pd.read_parquet(data_path)
     required = {src_key, src_lang_key, trg_lang_key}

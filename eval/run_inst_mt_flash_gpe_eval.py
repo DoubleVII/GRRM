@@ -11,6 +11,7 @@ from eval.run_mt_eval import (
     save_results_to_json,
 )
 from inference.run_inst_flash_gpe_mt import init_inst_model, run_pipeline
+from inference.run_inst_fused_flash_gpe_mt import run_pipeline as run_fused_pipeline
 from inference.run_oss_diverse_mt import normalize_bool
 from utils.helpers import load_datasets_from_dir
 
@@ -32,6 +33,13 @@ def main(
     model_path: str,
     model_name: str,
     candidate_count: int = 4,
+    fused: bool = False,
+    fused_temperature: float = 1.0,
+    fused_top_p: float = 1.0,
+    fused_top_k: int = 0,
+    fused_presence_penalty: float = 0.0,
+    fused_repetition_penalty: float = 1.0,
+    fused_max_new_tokens: int = 8192,
     candidate_temperature: float = 1.0,
     candidate_top_p: float = 1.0,
     candidate_top_k: int = 0,
@@ -53,6 +61,7 @@ def main(
     **kwargs,
 ):
     """Evaluate instruct FlashGPE with the standard MT metrics."""
+    fused = normalize_bool(fused, "fused")
     if candidate_count < 2:
         raise ValueError("candidate_count must be at least 2")
     if runs < 1:
@@ -68,10 +77,24 @@ def main(
 
     flat_size = item_count * runs
     engine = init_inst_model(model_path, **kwargs.get("mt_vllm_kwargs", {}))
-    pipeline = run_pipeline(
+    pipeline_runner = run_fused_pipeline if fused else run_pipeline
+    pipeline_args = (
         frame["src_text"].tolist() * runs,
         frame["src_lang"].tolist() * runs,
         frame["trg_lang"].tolist() * runs,
+    )
+    pipeline_kwargs = {}
+    if fused:
+        pipeline_kwargs.update(
+            model=engine, candidate_count=candidate_count,
+            temperature=fused_temperature, top_p=fused_top_p, top_k=fused_top_k,
+            presence_penalty=fused_presence_penalty,
+            repetition_penalty=fused_repetition_penalty,
+            max_tokens=fused_max_new_tokens, retry=retry,
+            enable_thinking=enable_thinking,
+        )
+    else:
+        pipeline_kwargs.update(
         model=engine,
         max_candidates=candidate_count,
         candidate_counts=[candidate_count] * flat_size,
@@ -89,8 +112,9 @@ def main(
         post_edit_max_tokens=post_edit_max_new_tokens,
         retry=retry,
         enable_thinking=enable_thinking,
-    )
-    raw_predictions = pipeline["post_edit"]["translations"]
+        )
+    pipeline = pipeline_runner(*pipeline_args, **pipeline_kwargs)
+    raw_predictions = pipeline["translations"] if fused else pipeline["post_edit"]["translations"]
     predictions = [value or "Translation Failed." for value in raw_predictions]
     if len(predictions) != flat_size:
         raise ValueError(f"Expected {flat_size} predictions, got {len(predictions)}")
@@ -127,23 +151,30 @@ def main(
             valid_metrics[current_id].append(metric)
         evaluated_metrics.append(metric)
 
-    candidate_failures = sum(
-        count < 2 for count in pipeline["usable_candidate_counts"]
-    )
-    post_edit_failures = sum(
-        count >= 2 and value is None
-        for count, value in zip(
-            pipeline["usable_candidate_counts"], raw_predictions
+    method = "inst_fused_flash_gpe" if fused else "inst_flash_gpe"
+    if fused:
+        parse_failures = sum(value is None for value in raw_predictions)
+    else:
+        candidate_failures = sum(
+            count < 2 for count in pipeline["usable_candidate_counts"]
         )
-    )
+        post_edit_failures = sum(
+            count >= 2 and value is None
+            for count, value in zip(
+                pipeline["usable_candidate_counts"], raw_predictions
+            )
+        )
     print(
-        f"method=inst_flash_gpe | model={model_name} | "
+        f"method={method} | model={model_name} | "
         f"candidate_count={candidate_count} | runs={runs}"
     )
-    print(
-        f"candidate_generation_failures={candidate_failures} | "
-        f"post_edit_failures={post_edit_failures}"
-    )
+    if fused:
+        print(f"fused_parse_failures={parse_failures}")
+    else:
+        print(
+            f"candidate_generation_failures={candidate_failures} | "
+            f"post_edit_failures={post_edit_failures}"
+        )
     for current_id in data_ids:
         print(f"\n=== {current_id} ===")
         for metric, value in metric_results[current_id].items():
@@ -164,11 +195,11 @@ def main(
                 dataset_name=current_id,
                 model_name=model_name,
                 model_path=model_path,
-                temperature=post_edit_temperature,
-                top_p=post_edit_top_p,
-                max_new_tokens=post_edit_max_new_tokens,
+                temperature=fused_temperature if fused else post_edit_temperature,
+                top_p=fused_top_p if fused else post_edit_top_p,
+                max_new_tokens=fused_max_new_tokens if fused else post_edit_max_new_tokens,
                 runs=runs,
-                prompt_type=f"inst-flash-gpe-n{candidate_count}",
+                prompt_type=f"{method}-n{candidate_count}",
             )
 
     log_results_to_wandb(
@@ -177,8 +208,15 @@ def main(
             "dataset_names": data_ids,
             "model_path": model_path,
             "model_name": model_name,
-            "method": "inst_flash_gpe",
+            "method": method,
             "candidate_count": candidate_count,
+            "fused": fused,
+            "fused_temperature": fused_temperature,
+            "fused_top_p": fused_top_p,
+            "fused_top_k": fused_top_k,
+            "fused_presence_penalty": fused_presence_penalty,
+            "fused_repetition_penalty": fused_repetition_penalty,
+            "fused_max_new_tokens": fused_max_new_tokens,
             "candidate_temperature": candidate_temperature,
             "candidate_top_p": candidate_top_p,
             "candidate_top_k": candidate_top_k,
@@ -194,7 +232,7 @@ def main(
             "runs": runs,
             "metrics": evaluated_metrics,
             "lang_pairs": lang_pairs,
-            "prompt_type": "markdown",
+            "prompt_type": "fused-markdown" if fused else "markdown",
             "data_dir": data_dir,
             "enable_thinking": enable_thinking,
             "retry": retry,

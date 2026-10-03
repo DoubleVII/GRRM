@@ -97,3 +97,47 @@ Source text:
 ```
 
 {rendered}"""
+
+
+def build_fused_prompt(
+    source_lang: str,
+    target_lang: str,
+    source_text: str,
+    max_candidates: int = 4,
+) -> str:
+    """Build the one-pass prompt combining candidate generation and post-editing."""
+    validate_prompt_type("markdown", max_candidates)
+    source_lang = LANG_MAP.get(source_lang, source_lang)
+    target_lang = LANG_MAP.get(target_lang, target_lang)
+    headings = "\n\n".join(
+        f"# Candidate {i}\n\n[complete {target_lang} translation candidate {i}]"
+        for i in range(1, max_candidates + 1)
+    )
+    return f"""Translate the source text from {source_lang} to {target_lang} in one response.
+
+First provide a detailed step-by-step analysis of meaning, context, ambiguity, tone, and translation constraints. Then produce exactly {max_candidates} complete and meaningfully different translation candidates. Compare every candidate against the source in detail, identify concrete strengths and errors, and use that comparison to produce the best corrected final translation.
+
+Preserve every source fact, entity, number, unit, polarity, degree, time, and logical relationship. Each candidate must be independently correct and complete. Diversity must not introduce omissions, unsupported content, or commentary inside translations.
+
+Output exactly these sections in this order, using the headings literally. Do not use code fences or add other headings:
+
+# Step-by-step Analysis
+
+[detailed analysis]
+
+{headings}
+
+# Candidate Comparison
+
+[detailed comparison of all candidates and reasons for the final choices]
+
+# Final Translation
+
+[one complete final translation in {target_lang}]
+
+The final translation must be the last content in the response.
+
+Source text:
+<source>
+{source_text}
+</source>"""

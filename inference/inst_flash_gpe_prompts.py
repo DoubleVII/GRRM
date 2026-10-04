@@ -119,7 +119,7 @@ First provide a detailed step-by-step analysis of meaning, context, ambiguity, t
 
 Preserve every source fact, entity, number, unit, polarity, degree, time, and logical relationship. Each candidate must be independently correct and complete. Diversity must not introduce omissions, unsupported content, or commentary inside translations.
 
-Output exactly these sections in this order, using the headings literally. Do not use code fences or add other headings:
+Output exactly these sections in this order, using the headings literally:
 
 # Step-by-step Analysis
 

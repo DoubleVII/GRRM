@@ -45,13 +45,21 @@ def main(
         temperature=temperature, top_p=top_p, max_tokens=max_tokens, retry=retry,
     )
     records = []
-    dropped = 0
+    failed = 0
     for index, row in frame.iterrows():
         parsed = output["key_points"][index]
-        if parsed is None:
-            dropped += 1
-            continue
         record = row.to_dict()
+        if parsed is None:
+            failed += 1
+            record.update({
+                "key_points": None,
+                "key_points_prompt": output["prompts"][index],
+                "key_points_thinking": output["thinking"][index],
+                "key_points_response": output["responses"][index],
+                "key_points_parser_valid": False,
+            })
+            records.append(record)
+            continue
         record.update({
             "key_points": json.dumps(parsed["key_points"], ensure_ascii=False),
             "key_points_prompt": output["prompts"][index],
@@ -67,7 +75,7 @@ def main(
         "key_points_response", "key_points_parser_valid",
     ]
     pd.DataFrame(records, columns=output_columns).to_parquet(destination, index=False)
-    print(f"Saved {len(records)} valid key-point rows to {destination}; dropped {dropped} parser-invalid rows")
+    print(f"Saved {len(records)} key-point rows to {destination}; {failed} rows have parser-invalid results")
 
 
 if __name__ == "__main__":

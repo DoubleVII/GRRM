@@ -19,7 +19,7 @@ def main(
     data_id="seedx_challenge_zhen",
     model_path: str = "/home/zfs01/yangs/LLM/openai/gpt-oss-120b",
     output_path: Optional[str] = None,
-    max_samples: int = 16,
+    max_samples: int = 0,
     seed: int = 42,
     sampling_n: int = 4,
     reasoning_effort: str = "medium",

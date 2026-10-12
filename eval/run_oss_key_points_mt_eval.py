@@ -26,7 +26,7 @@ def main(
     data_id="seedx_challenge_zhen",
     model_path: str = "openai/gpt-oss-120b",
     output_path: str = "results/oss_key_points_mt_eval.json",
-    max_samples: int = 16,
+    max_samples: int = 0,
     seed: int = 42,
     reasoning_effort: str = "medium",
     key_points_temperature: float = 1.0,

@@ -5,7 +5,7 @@ from typing import Optional, Union
 
 from inference.oss_key_points_mt_prompts import build_convergent_prompt
 from inference.run_oss_SQM import init_oss_model, load_encoding
-from inference.run_oss_diverse_mt import _generate_with_retries, _prepare_inputs
+from inference.run_oss_diverse_mt import _generate_with_retries, _prepare_inputs, normalize_bool
 from inference.run_oss_key_points import run_key_points_stage, validate_key_points_result
 
 
@@ -85,7 +85,9 @@ def run_pipeline(
     final_top_p: float = 1.0,
     final_max_tokens: int = 8192,
     retry: int = 3,
+    allow_key_points_failure: bool = False,
 ) -> dict:
+    allow_key_points_failure = normalize_bool(allow_key_points_failure, "allow_key_points_failure")
     src_langs, trg_langs = _normalize_languages(len(src_list), src_langs, trg_langs)
     convergent = {key: [None] * len(src_list)
                   for key in ("prompts", "translations", "responses", "thinking")}
@@ -99,11 +101,12 @@ def run_pipeline(
         top_p=key_points_top_p, max_tokens=stage1_max_tokens, retry=retry,
     )
     valid_indices = [i for i, value in enumerate(key_points["key_points"])
-                     if value is not None]
+                     if value is not None or allow_key_points_failure]
     if valid_indices:
         result = run_convergent_stage(
             [src_list[i] for i in valid_indices],
-            [key_points["key_points"][i] for i in valid_indices],
+            [key_points["key_points"][i] if key_points["key_points"][i] is not None
+             else {"key_points": []} for i in valid_indices],
             [src_langs[i] for i in valid_indices], [trg_langs[i] for i in valid_indices],
             model=llm, model_path=model_path, reasoning_effort=reasoning_effort,
             temperature=final_temperature, top_p=final_top_p,
@@ -142,6 +145,7 @@ def main(
     final_top_p: float = 1.0,
     final_max_tokens: int = 8192,
     retry: int = 3,
+    allow_key_points_failure: bool = False,
     gpu_memory_utilization: float = 0.9,
     max_model_len: int = 32768,
 ):
@@ -165,6 +169,7 @@ def main(
         key_points_temperature=key_points_temperature, key_points_top_p=key_points_top_p,
         stage1_max_tokens=stage1_max_tokens, final_temperature=final_temperature,
         final_top_p=final_top_p, final_max_tokens=final_max_tokens, retry=retry,
+        allow_key_points_failure=allow_key_points_failure,
     )
     items = [{"index": i, "src_text": row["src_text"], "src_lang": row["src_lang"],
               "trg_lang": row["trg_lang"], "ref_text": row.get("trg_text"),

@@ -37,6 +37,7 @@ def main(
     final_max_tokens: int = 8192,
     runs: int = 1,
     retry: int = 3,
+    allow_key_points_failure: bool = False,
     gpu_memory_utilization: float = 0.9,
     max_model_len: int = 32768,
 ):
@@ -56,6 +57,7 @@ def main(
         key_points_temperature=key_points_temperature, key_points_top_p=key_points_top_p,
         stage1_max_tokens=stage1_max_tokens, final_temperature=final_temperature,
         final_top_p=final_top_p, final_max_tokens=final_max_tokens, retry=retry,
+        allow_key_points_failure=allow_key_points_failure,
     )
     translations = output["convergent"]["translations"]
     evaluation = _score_translations(frame, translations, model, model_path, runs=runs)

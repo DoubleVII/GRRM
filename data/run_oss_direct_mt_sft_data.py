@@ -4,10 +4,10 @@ import fire
 import pandas as pd
 
 from data.oss_mt_sft_data_utils import nonempty_text
-from inference.oss_diverse_mt_prompts import build_direct_prompt
+from inference.inst_mt_prompts import build_translation_prompt
+from inference.run_inst_mt import extract_translation_response
 from inference.run_oss_SQM import init_oss_model
 from inference.run_oss_direct_mt import run_direct_stage
-from inference.run_oss_diverse_mt import extract_final_translation
 
 
 METHOD_NAME = "Direct Translation"
@@ -66,17 +66,18 @@ def main(
         response = output["responses"][index]
         thinking = output["thinking"][index]
         translation = output["translations"][index]
-        parsed = extract_final_translation(response) if nonempty_text(response) else None
+        parsed = extract_translation_response(response)
         valid = (
             nonempty_text(thinking)
-            and nonempty_text(parsed)
-            and parsed == translation
+            and parsed is not None
+            and parsed["translation"] == translation
         )
         if not valid:
             invalid_count += 1
             continue
-        prompt = build_direct_prompt(
-            row[src_lang_key], row[trg_lang_key], row[src_key]
+        prompt = build_translation_prompt(
+            row[src_lang_key], row[trg_lang_key], row[src_key],
+            prompt_version="codeblock",
         )
         record = row.to_dict()
         record.update({

@@ -29,13 +29,13 @@ def main(
     max_candidates: int = 8,
     prompt_type: str = "markdown",
     reasoning_effort: str = "medium",
-    candidate_temperature: float = 0.8,
+    candidate_temperature: float = 1.0,
     candidate_top_p: float = 0.95,
     candidate_max_tokens: int = 4096,
-    post_edit_temperature: float = 0.3,
-    post_edit_top_p: float = 0.8,
+    post_edit_temperature: float = 0.9,
+    post_edit_top_p: float = 0.95,
     post_edit_max_tokens: int = 4096,
-    retry: int = 3,
+    retry: int = 8,
     seed: int = 114514,
     gpu_memory_utilization: float = 0.9,
     max_model_len: int = 32768,
@@ -54,6 +54,7 @@ def main(
     if max_samples > 0:
         frame = frame.head(max_samples)
     frame = frame.reset_index(drop=True)
+    print("data size:", len(frame))
     rng = random.Random(seed)
     candidate_counts = [
         rng.randint(min_candidates, max_candidates) for _ in range(len(frame))

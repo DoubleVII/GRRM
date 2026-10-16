@@ -43,7 +43,7 @@ def _split_stage(text: str, heading: str):
     return thinking, response
 
 
-def parse_fkp_response(text: Optional[str], source_text: str) -> Optional[dict]:
+def _parse_strict_fkp_response(text: Optional[str], source_text: str) -> Optional[dict]:
     if not isinstance(text, str):
         return None
     text = text.replace("\r\n", "\n").strip()
@@ -73,5 +73,60 @@ def parse_fkp_response(text: Optional[str], source_text: str) -> Optional[dict]:
         "key_points_thinking": first[0], "key_points_response": first[1],
         "key_points": points["key_points"],
         "convergent_thinking": second[0], "convergent_response": second[1],
+        "parsed": translation,
+    }
+
+
+def parse_fkp_response(
+    text: Optional[str], source_text: str, *, relaxed_parsing: bool = False,
+) -> Optional[dict]:
+    """Optionally accept a final translation without a valid two-stage envelope."""
+    parsed = _parse_strict_fkp_response(text, source_text)
+    if parsed is not None or not relaxed_parsing or not isinstance(text, str):
+        return parsed
+    text = text.replace("\r\n", "\n").strip()
+    headings = list(re.finditer(
+        r"(?im)^[ \t]*#{1,6}[ \t]+Final Translation[ \t]*:?[ \t]*$", text,
+    ))
+    response = text[headings[-1].end():].strip() if headings else text
+    blocks = list(re.finditer(
+        r"(?m)^[ \t]*```([^\n`]*)\n(.*?)\n[ \t]*```[ \t]*(?=\n|$)",
+        response, re.DOTALL,
+    ))
+    if blocks:
+        block = blocks[-1]
+        translation = block.group(2).strip()
+        # A key-point JSON block alone is not a final translation.
+        if block.group(1).strip().lower() == "json":
+            return None
+        try:
+            value = json.loads(translation)
+        except ValueError:
+            value = None
+        if isinstance(value, dict) and "key_points" in value:
+            return None
+    elif headings and "```" not in response:
+        translation = response
+    else:
+        return None
+    if not translation:
+        return None
+
+    # Keep valid key points when possible, but never require them for acceptance.
+    points_response = ""
+    points = None
+    key_heading = re.search(r"(?im)^#{1,6}[ \t]+Key Points[ \t]*:?[ \t]*$", text)
+    if key_heading:
+        points_response = text[key_heading.end():].lstrip()
+        try:
+            value, end = json.JSONDecoder().raw_decode(points_response)
+            points_response = points_response[:end]
+            points = validate_key_points_result(value, source_text)
+        except (ValueError, TypeError):
+            points_response = ""
+    return {
+        "key_points_thinking": "", "key_points_response": points_response,
+        "key_points": points["key_points"] if points is not None else [],
+        "convergent_thinking": "", "convergent_response": response,
         "parsed": translation,
     }

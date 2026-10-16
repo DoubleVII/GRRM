@@ -27,6 +27,7 @@ def main(
     save_results: bool = False,
     data_dir: Optional[str] = None,
     retry: int = 3,
+    relaxed_parsing: bool = False,
     **kwargs,
 ):
     if runs < 1:
@@ -53,6 +54,7 @@ def main(
             model_path, df.src_text.tolist() * runs, df.src_lang.tolist() * runs,
             df.trg_lang.tolist() * runs, model=model, tokenizer=tokenizer,
             temperature=temperature, top_p=top_p, max_new_tokens=max_new_tokens, retry=retry,
+            relaxed_parsing=relaxed_parsing,
         )
     finally:
         _release_vllm_model(model)
@@ -92,7 +94,8 @@ def main(
         "generation_failures": predictions.count("Translation Failed."),
     }
     print(json.dumps({"summary": summary, "metrics": metric_results, "metric_none": metric_none}, indent=2))
-    settings = {"temperature": temperature, "top_p": top_p, "max_new_tokens": max_new_tokens, "retry": retry}
+    settings = {"temperature": temperature, "top_p": top_p, "max_new_tokens": max_new_tokens,
+                "retry": retry, "relaxed_parsing": relaxed_parsing}
     if save_results:
         extra_items = [{key: [output[field][r * n_items + i] for r in range(runs)]
                         for key, field in (("key_points", "key_points"), ("key_point_count", "key_point_counts"),

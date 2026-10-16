@@ -17,6 +17,7 @@ def func_call(
     top_p: float = 1.0,
     max_new_tokens: int = 8192,
     retry: int = 3,
+    relaxed_parsing: bool = False,
     use_chat_template: bool = True,
     model=None,
     tokenizer=None,
@@ -56,7 +57,9 @@ def func_call(
                 if not output.outputs:
                     continue
                 raw_outputs[i] = output.outputs[0].text
-                parsed_outputs[i] = parse_fkp_response(raw_outputs[i], src_list[i])
+                parsed_outputs[i] = parse_fkp_response(
+                    raw_outputs[i], src_list[i], relaxed_parsing=relaxed_parsing,
+                )
     key_points = [parsed["key_points"] if parsed is not None else [] for parsed in parsed_outputs]
     return {
         "responses": [parsed["parsed"] if parsed is not None else "Translation Failed."

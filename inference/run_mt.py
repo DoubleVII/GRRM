@@ -1,7 +1,12 @@
 from typing import Union, List, Optional
 from utils.config import LANG_MAP
-from utils.helpers import get_auto_tp_size
 from inference.prompts import build_notes_prompt
+from utils.helpers import (
+    extract_answer_tag as _ssr_extractor,
+    extract_before_cot as _cot_extractor,
+    extract_trailing_code_block as _block_extractor,
+    get_auto_tp_size,
+)
 
 def load_model_tokenizer(model_path: str, **vllm_kwargs):
     from vllm import LLM
@@ -12,78 +17,6 @@ def load_model_tokenizer(model_path: str, **vllm_kwargs):
     tokenizer = model.get_tokenizer()
     return model, tokenizer
 
-
-
-
-def _block_extractor(response:str) -> str:
-    empty_out = None
-
-    response = response.strip()
-    if not response:
-        return empty_out
-    if not response.endswith("```"):
-        return empty_out
-    response = response[:-3]
-    block_start = response.rfind("```")
-    if block_start == -1:
-        return empty_out
-    extract_out = response[block_start+3:]
-    if extract_out and not extract_out.startswith("\n"):
-        extract_out = extract_out.split("\n", 1)[-1]
-    extract_out = extract_out.strip()
-    if not extract_out:
-        return empty_out
-    return extract_out
-
-def _ssr_extractor(response: str) -> str:
-    """Extract the final answer from SSR-style outputs.
-
-    The SSR models are instructed to wrap the reasoning in <think>...</think>
-    and the final answer in <answer>...</answer>. We only return the content
-    inside the <answer> tag. Returning None signals a failed extraction and
-    will trigger a retry in the caller.
-    """
-    empty_out = None
-
-    if response is None:
-        return empty_out
-
-    response = response.strip()
-    if not response:
-        return empty_out
-
-    start_tag = "<answer>"
-    end_tag = "</answer>"
-
-    start = response.find(start_tag)
-    if start == -1:
-        return empty_out
-    start += len(start_tag)
-
-    end = response.find(end_tag, start)
-    if end == -1:
-        return empty_out
-
-    extract_out = response[start:end].strip()
-    if not extract_out:
-        return empty_out
-    return extract_out
-
-def _cot_extractor(response: str) -> str:
-    """
-    seedx output: translation\n[COT] cot text
-    """
-    cot_tag = "[COT]"
-    empty_out = None
-
-    response = response.strip()
-    if not response:
-        return empty_out
-    if cot_tag not in response:
-        return response.strip()
-    response = response[:response.find(cot_tag)]
-    response = response.strip()
-    return response
 
 def extract_answer(text: str, prompt_type: str):
     if prompt_type == "Tower.lastl":
@@ -147,7 +80,6 @@ Source text:
         return system_prompt.format(user_question)
     else:
         raise NotImplementedError
-
 
 
 def func_call(

@@ -3,7 +3,7 @@ from typing import Any, Optional
 from data.oss_mt_sft_data_utils import nonempty_text
 from inference.oss_flash_gpe_prompts import validate_prompt_type
 from inference.run_oss_flash_gpe_mt import extract_candidate_response
-from inference.run_oss_group_post_edit import extract_response as extract_gpe_response
+from utils.helpers import extract_post_edit_translation as extract_gpe_response
 
 
 def validate_flash_gpe_record(

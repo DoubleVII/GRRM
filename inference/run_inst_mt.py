@@ -1,11 +1,15 @@
 import json
-import re
 from pathlib import Path
 from typing import Callable, Optional, Union
 
 from inference.inst_mt_prompts import build_translation_prompt
-from inference.run_mt import _block_extractor
-from utils.helpers import get_auto_tp_size
+from utils.helpers import (
+    extract_legacy_translation_response,
+    extract_trailing_code_block as _block_extractor,
+    extract_translation_response,
+    get_auto_tp_size,
+    split_thinking,
+)
 
 
 class InstructEngine:
@@ -36,59 +40,6 @@ def _render_prompt(
         add_generation_prompt=True,
         enable_thinking=enable_thinking,
     )
-
-
-def split_thinking(text: str) -> tuple[Optional[str], str]:
-    text = (text or "").strip()
-    match = re.match(r"^\s*<think>(.*?)</think>\s*(.*)$", text, re.DOTALL)
-    if match:
-        return match.group(1).strip() or None, match.group(2).strip()
-    if "</think>" in text:
-        thinking, answer = text.split("</think>", 1)
-        return thinking.removeprefix("<think>").strip() or None, answer.strip()
-    return None, text
-
-
-def extract_translation_response(response: str) -> Optional[dict[str, str]]:
-    if not isinstance(response, str):
-        return None
-    analysis_marker = "# Step-by-step Analysis"
-    translation_marker = "# Final Translation"
-    if not response.startswith(analysis_marker):
-        return None
-    if response.count(analysis_marker) != 1 or response.count(translation_marker) != 1:
-        return None
-    marker_index = response.index(translation_marker)
-    analysis = response[len(analysis_marker):marker_index].strip()
-    final_section = response[marker_index + len(translation_marker):].strip()
-    if not analysis or not final_section:
-        return None
-    if "```" in analysis or not final_section.startswith("```"):
-        return None
-    translation = _block_extractor(final_section)
-    if translation is None or "```" in translation or translation.startswith("# "):
-        return None
-    return {"analysis": analysis, "translation": translation}
-
-
-def extract_legacy_translation_response(response: str) -> Optional[dict[str, str]]:
-    """Parse responses produced with the pre-code-block instruct prompt."""
-    if not isinstance(response, str):
-        return None
-    analysis_marker = "# Step-by-step Analysis"
-    translation_marker = "# Final Translation"
-    if not response.startswith(analysis_marker):
-        return None
-    if response.count(analysis_marker) != 1 or response.count(translation_marker) != 1:
-        return None
-    marker_index = response.index(translation_marker)
-    analysis = response[len(analysis_marker):marker_index].strip()
-    translation = response[marker_index + len(translation_marker):].strip()
-    if not analysis or not translation:
-        return None
-    if "```" in analysis or "```" in translation or translation.startswith("# "):
-        return None
-    return {"analysis": analysis, "translation": translation}
 
 
 def _generate_with_retries(

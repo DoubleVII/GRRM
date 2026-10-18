@@ -1,5 +1,6 @@
 from typing import Union, List, Optional
 from utils.config import LANG_MAP
+from utils.helpers import extract_before_cot as _cot_extractor
 
 
 def load_model_tokenizer(model_path: str):
@@ -9,21 +10,6 @@ def load_model_tokenizer(model_path: str):
     tokenizer = model.get_tokenizer()
     return model, tokenizer
 
-def _cot_extractor(response: str) -> str:
-    """
-    seedx output: translation\n[COT] cot text
-    """
-    cot_tag = "[COT]"
-    empty_out = None
-
-    response = response.strip()
-    if not response:
-        return empty_out
-    if cot_tag not in response:
-        return response.strip()
-    response = response[:response.find(cot_tag)]
-    response = response.strip()
-    return response
 
 def extract_answer(text: str, prompt_type: str):
     if prompt_type == "CoT":
@@ -44,8 +30,6 @@ def get_prompt(
         return f"Translate the following {src_lang} sentence into {trg_lang} and explain it in detail:\n{src_text} <{trg_token}>"
     else:
         return f"Translate the following {src_lang} sentence into {trg_lang}:\n{src_text} <{trg_token}>"
-
-
 
 
 def func_call(

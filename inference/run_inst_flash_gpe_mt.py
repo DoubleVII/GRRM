@@ -8,8 +8,12 @@ from inference.inst_flash_gpe_prompts import (
     build_post_edit_prompt,
     validate_prompt_type,
 )
-from inference.run_mt import _block_extractor
-from utils.helpers import get_auto_tp_size
+from utils.helpers import (
+    extract_inst_post_edit_response as extract_post_edit_response,
+    extract_trailing_code_block as _block_extractor,
+    get_auto_tp_size,
+    split_thinking,
+)
 
 
 class InstructEngine:
@@ -38,17 +42,6 @@ def _render_prompt(engine: InstructEngine, prompt: str, enable_thinking: bool) -
         add_generation_prompt=True,
         enable_thinking=enable_thinking,
     )
-
-
-def split_thinking(text: str) -> tuple[Optional[str], str]:
-    text = (text or "").strip()
-    match = re.match(r"^\s*<think>(.*?)</think>\s*(.*)$", text, re.DOTALL)
-    if match:
-        return match.group(1).strip() or None, match.group(2).strip()
-    if "</think>" in text:
-        thinking, answer = text.split("</think>", 1)
-        return thinking.removeprefix("<think>").strip() or None, answer.strip()
-    return None, text
 
 
 def extract_candidate_response(
@@ -82,32 +75,6 @@ def extract_candidate_response(
         translations.append(value)
     normalized = {" ".join(item.split()).casefold() for item in translations}
     return translations if len(normalized) == len(translations) else None
-
-
-def extract_post_edit_response(
-    response: str, *, explicit_analysis: bool = False
-) -> Optional[str]:
-    if not isinstance(response, str):
-        return None
-    marker = "# Final Translation"
-    if explicit_analysis:
-        analysis_marker = "# Step-by-step Analysis"
-        if not response.startswith(analysis_marker):
-            return None
-        if marker not in response or response.count(marker) != 1:
-            return None
-        analysis = response[len(analysis_marker):response.index(marker)].strip()
-        if not analysis:
-            return None
-    elif not response.startswith(marker) or response.count(marker) != 1:
-        return None
-    final_section = response.split(marker, 1)[1].strip()
-    if not final_section.startswith("```"):
-        return None
-    value = _block_extractor(final_section)
-    if value is None or value.startswith("# ") or "```" in value:
-        return None
-    return value
 
 
 def _generate_with_retries(

@@ -15,8 +15,8 @@ from inference.prompts import (
     format_GQM_scores,
     get_oss_GQM_post_edit_completion_prompt,
 )
-from inference.run_mt import _block_extractor
 from inference.run_oss_SQM import init_oss_model, load_encoding
+from utils.helpers import extract_trailing_code_block as _block_extractor
 
 
 POST_EDIT_ANALYSIS_HEADING = "# Post-edit Analysis"

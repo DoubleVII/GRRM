@@ -7,7 +7,7 @@ from inference.run_oss_diverse_mt import (
     extract_json_object,
     validate_divergent_result,
 )
-from inference.run_oss_group_post_edit import extract_response as extract_gpe_response
+from utils.helpers import extract_post_edit_translation as extract_gpe_response
 
 
 def nonempty_text(value: Any) -> bool:

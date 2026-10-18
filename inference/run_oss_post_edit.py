@@ -14,9 +14,8 @@ from openai_harmony import (
 )
 from utils.config import LANG_MAP
 from inference.run_oss_SQM import init_oss_model, load_encoding
-from inference.run_mt import _block_extractor
 from inference.prompts import get_post_edit_prompt
-
+from utils.helpers import extract_trailing_code_block as _block_extractor
 
 
 def extract_response(response: str):
@@ -29,7 +28,6 @@ def extract_response(response: str):
     if not post_edit_mt_text:
         return None
     return post_edit_mt_text
-
 
 
 def prepare_vllm_inputs(src_list: list[str], mt_list: list[str], notes_list: list[str], src_langs: list[str], trg_langs: list[str], encoding: HarmonyEncoding, reasoning_effort: str = None):

@@ -7,10 +7,10 @@ import pandas as pd
 from inference.inst_flash_gpe_prompts import validate_prompt_type
 from inference.run_inst_flash_gpe_mt import (
     extract_candidate_response,
-    extract_post_edit_response,
     init_inst_model,
     run_pipeline,
 )
+from utils.helpers import extract_inst_post_edit_response as extract_post_edit_response
 
 
 METHOD_NAME = "Instruct FlashGPE"

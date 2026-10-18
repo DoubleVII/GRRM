@@ -4,13 +4,13 @@ import fire
 import pandas as pd
 
 from inference.run_oss_diverse_mt import extract_final_translation
-from inference.run_oss_group_post_edit import extract_response as extract_gpe
 from inference.sft_mt_protocol import (
     build_sft_direct_prompt,
     build_sft_gpe_prompt,
     format_sft_output,
     parse_task_output,
 )
+from utils.helpers import extract_post_edit_translation as extract_gpe
 
 
 def _sequence_length(tokenizer, messages: list[dict]) -> int:
@@ -76,23 +76,29 @@ def main(
     for source_index, row in frame.iterrows():
         if not bool(row["gpe_parser_valid"]):
             raise ValueError(f"Input row {source_index} is not parser-valid")
+        translations = list(row["gpe_stage1_translations"])
         direct_values = list(zip(
-            row["gpe_stage1_thinking"], row["gpe_stage1_responses"],
-            row["gpe_stage1_translations"],
+            row["gpe_stage1_thinking"],
+            row["gpe_stage1_responses"],
+            translations,
         ))
         if len(direct_values) != 4:
             raise ValueError(
-                f"Input row {source_index} has {len(direct_values)} direct candidates; expected 4"
+                f"Input row {source_index} has {len(direct_values)} "
+                "direct candidates; expected 4"
             )
         direct_prompt = build_sft_direct_prompt(
             row["src_lang"], row["trg_lang"], row["src_text"]
         )
-        for candidate_index, (thinking, response, translation) in enumerate(direct_values):
+        for candidate_index, (thinking, response, translation) in enumerate(
+            direct_values
+        ):
             assistant = format_sft_output(thinking, response)
             parsed = parse_task_output(assistant, extract_final_translation)
             if parsed is None or parsed["parsed"] != translation:
                 raise ValueError(
-                    f"Direct response failed round-trip validation at row {source_index}, candidate {candidate_index}"
+                    "Direct response failed round-trip validation at row "
+                    f"{source_index}, candidate {candidate_index}"
                 )
             messages = [
                 {"role": "user", "content": direct_prompt},
@@ -120,11 +126,14 @@ def main(
             raise ValueError(
                 f"GPE response failed round-trip validation at row {source_index}"
             )
+        stage2_prompt = build_sft_gpe_prompt(
+            row["src_lang"],
+            row["trg_lang"],
+            row["src_text"],
+            translations,
+        )
         messages = [
-            {"role": "user", "content": build_sft_gpe_prompt(
-                row["src_lang"], row["trg_lang"], row["src_text"],
-                list(row["gpe_stage1_translations"]),
-            )},
+            {"role": "user", "content": stage2_prompt},
             {"role": "assistant", "content": assistant},
         ]
         length = _sequence_length(tokenizer, messages)

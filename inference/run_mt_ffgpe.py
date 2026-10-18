@@ -5,13 +5,13 @@ from inference.ffgpe_protocol import (
     validate_ffgpe_protocol,
 )
 from inference.prompts import build_ffgpe_prompt, validate_ffgpe_prompt_type
-from inference.run_inst_flash_gpe_mt import (
-    extract_post_edit_response as extract_inst_post_edit_response,
-)
 from inference.run_mt import load_model_tokenizer
 from inference.run_oss_flash_gpe_mt import extract_candidate_response
-from inference.run_oss_group_post_edit import extract_response as extract_flash_gpe_post_edit
 from inference.sft_mt_protocol import parse_fused_task_output
+from utils.helpers import (
+    extract_inst_post_edit_response,
+    extract_post_edit_translation as extract_flash_gpe_post_edit,
+)
 
 
 def parse_ffgpe_response(

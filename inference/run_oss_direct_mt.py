@@ -1,12 +1,12 @@
 from typing import Optional, Union
 
 from inference.inst_mt_prompts import build_translation_prompt
-from inference.run_inst_mt import extract_translation_response
 from inference.run_oss_SQM import init_oss_model, load_encoding
 from inference.run_oss_diverse_mt import (
     _generate_with_retries,
     _prepare_inputs,
 )
+from utils.helpers import extract_translation_response
 
 
 def run_direct_stage(

@@ -2,9 +2,12 @@
 
 from typing import Optional, Union
 
-from inference.run_mt import _block_extractor, load_model_tokenizer
+from inference.run_mt import (
+    load_model_tokenizer,
+)
 from inference.sft_mt_protocol import parse_fused_task_output
 from inference.legacy.oss_flash_gpe_json import extract_candidate_response
+from utils.helpers import extract_trailing_code_block as _block_extractor
 
 
 def _validate_prompt_type(prompt_type: str, max_candidates: int) -> None:

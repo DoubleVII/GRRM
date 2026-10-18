@@ -1,8 +1,11 @@
 from typing import List, Optional, Union
 
 from inference.prompts import Task_format, get_GQM_GPE_prompt, get_GQM_prompt
-from inference.run_mt import _block_extractor, load_model_tokenizer
+from inference.run_mt import (
+    load_model_tokenizer,
+)
 from inference.run_rm_GQM import extract_score
+from utils.helpers import extract_trailing_code_block as _block_extractor
 
 
 def _as_list(value: Union[str, List[str]], n: int) -> List[str]:

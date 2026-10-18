@@ -4,7 +4,6 @@ import fire
 import pandas as pd
 
 from data.flash_gpe_sft_data_utils import normalize_flash_gpe_row
-from inference.run_oss_group_post_edit import extract_response as extract_gpe
 from inference.run_oss_flash_gpe_mt import extract_candidate_response
 from inference.sft_mt_protocol import (
     build_sft_flash_gpe_candidate_prompt,
@@ -12,6 +11,7 @@ from inference.sft_mt_protocol import (
     format_sft_output,
     parse_task_output,
 )
+from utils.helpers import extract_post_edit_translation as extract_gpe
 
 
 def _sequence_length(tokenizer, messages: list[dict]) -> int:

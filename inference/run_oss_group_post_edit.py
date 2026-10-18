@@ -11,24 +11,11 @@ from openai_harmony import (
 )
 from utils.config import LANG_MAP
 from inference.run_oss_SQM import init_oss_model, load_encoding
-from inference.run_mt import _block_extractor
 from inference.prompts import get_oss_group_post_edit_prompt
-
-
-def extract_response(response: str):
-    response = response.strip()
-    marker = "# Final Translation"
-    if marker in response:
-        value = response.split(marker, 1)[1].strip()
-        if value and not value.startswith("# ") and "```" not in value:
-            return value
-    post_edit_mt_text = _block_extractor(response)
-    if post_edit_mt_text is None:
-        return None
-    post_edit_mt_text = post_edit_mt_text.strip()
-    if not post_edit_mt_text:
-        return None
-    return post_edit_mt_text
+from utils.helpers import (
+    extract_post_edit_translation as extract_response,
+    extract_trailing_code_block as _block_extractor,
+)
 
 
 def prepare_vllm_inputs(

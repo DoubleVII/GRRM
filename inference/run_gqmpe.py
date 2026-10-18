@@ -1,10 +1,14 @@
 from typing import List, Optional, Union
 
 from inference.prompts import Task_format, get_GQMPE_prompt
-from inference.run_mt import _block_extractor
 from inference.run_rm_SQM import load_model_tokenizer
 from utils.config import candidate_identifiers
-from utils.helpers import _ranking_to_scores, _score_to_rank, parse_score_text
+from utils.helpers import (
+    _ranking_to_scores,
+    _score_to_rank,
+    extract_trailing_code_block as _block_extractor,
+    parse_score_text,
+)
 
 
 POST_EDIT_ANALYSIS_HEADER = "# Post-edit Analysis"

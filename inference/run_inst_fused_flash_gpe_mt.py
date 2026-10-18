@@ -10,9 +10,9 @@ from inference.run_inst_flash_gpe_mt import (
     _generate_with_retries,
     _normalize_languages,
     extract_candidate_response,
-    extract_post_edit_response,
     init_inst_model,
 )
+from utils.helpers import extract_inst_post_edit_response as extract_post_edit_response
 
 
 def extract_fused_response(response: str, candidate_count: int) -> Optional[dict]:

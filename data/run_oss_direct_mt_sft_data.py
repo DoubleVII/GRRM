@@ -5,9 +5,9 @@ import pandas as pd
 
 from data.oss_mt_sft_data_utils import nonempty_text
 from inference.inst_mt_prompts import build_translation_prompt
-from inference.run_inst_mt import extract_translation_response
 from inference.run_oss_SQM import init_oss_model
 from inference.run_oss_direct_mt import run_direct_stage
+from utils.helpers import extract_translation_response
 
 
 METHOD_NAME = "Direct Translation"

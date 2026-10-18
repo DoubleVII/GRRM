@@ -3,10 +3,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Union
 
-from inference.run_mt import _block_extractor
 from inference.oss_flash_gpe_prompts import validate_prompt_type
 from inference.run_oss_flash_gpe_mt import extract_candidate_response
-from inference.run_oss_group_post_edit import extract_response as extract_flash_gpe_post_edit
 from inference.run_oss_diverse_mt import (
     extract_final_translation,
     extract_json_object,
@@ -24,7 +22,11 @@ from inference.sft_mt_protocol import (
     parse_task_output,
 )
 from utils.config import LANG_MAP
-from utils.helpers import get_auto_tp_size
+from utils.helpers import (
+    extract_post_edit_translation as extract_flash_gpe_post_edit,
+    extract_trailing_code_block as _block_extractor,
+    get_auto_tp_size,
+)
 
 
 @dataclass

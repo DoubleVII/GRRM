@@ -7,6 +7,189 @@ from pathlib import Path
 from typing import Optional, Dict, List
 
 
+# Basic response formats
+
+
+def extract_trailing_code_block(response: str) -> Optional[str]:
+    """Extract the last code block only when its closing fence ends the response."""
+    empty_out = None
+
+    response = response.strip()
+    if not response:
+        return empty_out
+    if not response.endswith("```"):
+        return empty_out
+    response = response[:-3]
+    block_start = response.rfind("```")
+    if block_start == -1:
+        return empty_out
+    extract_out = response[block_start+3:]
+    if extract_out and not extract_out.startswith("\n"):
+        extract_out = extract_out.split("\n", 1)[-1]
+    extract_out = extract_out.strip()
+    if not extract_out:
+        return empty_out
+    return extract_out
+
+
+def extract_answer_tag(response: str) -> Optional[str]:
+    """Extract the final answer from SSR-style outputs.
+
+    The SSR models are instructed to wrap the reasoning in <think>...</think>
+    and the final answer in <answer>...</answer>. We only return the content
+    inside the <answer> tag. Returning None signals a failed extraction and
+    will trigger a retry in the caller.
+    """
+    empty_out = None
+
+    if response is None:
+        return empty_out
+
+    response = response.strip()
+    if not response:
+        return empty_out
+
+    start_tag = "<answer>"
+    end_tag = "</answer>"
+
+    start = response.find(start_tag)
+    if start == -1:
+        return empty_out
+    start += len(start_tag)
+
+    end = response.find(end_tag, start)
+    if end == -1:
+        return empty_out
+
+    extract_out = response[start:end].strip()
+    if not extract_out:
+        return empty_out
+    return extract_out
+
+
+def extract_before_cot(response: str) -> Optional[str]:
+    """
+    seedx output: translation\n[COT] cot text
+    """
+    cot_tag = "[COT]"
+    empty_out = None
+
+    response = response.strip()
+    if not response:
+        return empty_out
+    if cot_tag not in response:
+        return response.strip()
+    response = response[:response.find(cot_tag)]
+    response = response.strip()
+    return response
+
+
+def split_thinking(text: str) -> tuple[Optional[str], str]:
+    """Split optional think tags, including completions with only a closing tag."""
+    text = (text or "").strip()
+    match = re.match(r"^\s*<think>(.*?)</think>\s*(.*)$", text, re.DOTALL)
+    if match:
+        return match.group(1).strip() or None, match.group(2).strip()
+    if "</think>" in text:
+        thinking, answer = text.split("</think>", 1)
+        return thinking.removeprefix("<think>").strip() or None, answer.strip()
+    return None, text
+
+
+# Translation response protocols
+
+
+def extract_post_edit_translation(response: str) -> Optional[str]:
+    """Accept legacy plain final sections, otherwise extract the trailing block.
+
+    Search the whole response for the block: the section marker may also occur
+    in analysis or inside the translated text.
+    """
+    response = response.strip()
+    marker = "# Final Translation"
+    if marker in response:
+        value = response.split(marker, 1)[1].strip()
+        if value and not value.startswith("# ") and "```" not in value:
+            return value
+    post_edit_mt_text = extract_trailing_code_block(response)
+    if post_edit_mt_text is None:
+        return None
+    post_edit_mt_text = post_edit_mt_text.strip()
+    if not post_edit_mt_text:
+        return None
+    return post_edit_mt_text
+
+
+def extract_translation_response(response: str) -> Optional[dict[str, str]]:
+    """Validate instruct analysis and a fenced final translation."""
+    if not isinstance(response, str):
+        return None
+    analysis_marker = "# Step-by-step Analysis"
+    translation_marker = "# Final Translation"
+    if not response.startswith(analysis_marker):
+        return None
+    if response.count(analysis_marker) != 1 or response.count(translation_marker) != 1:
+        return None
+    marker_index = response.index(translation_marker)
+    analysis = response[len(analysis_marker):marker_index].strip()
+    final_section = response[marker_index + len(translation_marker):].strip()
+    if not analysis or not final_section:
+        return None
+    if "```" in analysis or not final_section.startswith("```"):
+        return None
+    translation = extract_trailing_code_block(final_section)
+    if translation is None or "```" in translation or translation.startswith("# "):
+        return None
+    return {"analysis": analysis, "translation": translation}
+
+
+def extract_legacy_translation_response(response: str) -> Optional[dict[str, str]]:
+    """Parse responses produced with the pre-code-block instruct prompt."""
+    if not isinstance(response, str):
+        return None
+    analysis_marker = "# Step-by-step Analysis"
+    translation_marker = "# Final Translation"
+    if not response.startswith(analysis_marker):
+        return None
+    if response.count(analysis_marker) != 1 or response.count(translation_marker) != 1:
+        return None
+    marker_index = response.index(translation_marker)
+    analysis = response[len(analysis_marker):marker_index].strip()
+    translation = response[marker_index + len(translation_marker):].strip()
+    if not analysis or not translation:
+        return None
+    if "```" in analysis or "```" in translation or translation.startswith("# "):
+        return None
+    return {"analysis": analysis, "translation": translation}
+
+
+def extract_inst_post_edit_response(
+    response: str, *, explicit_analysis: bool = False
+) -> Optional[str]:
+    """Validate an instruct post-edit response with optional explicit analysis."""
+    if not isinstance(response, str):
+        return None
+    marker = "# Final Translation"
+    if explicit_analysis:
+        analysis_marker = "# Step-by-step Analysis"
+        if not response.startswith(analysis_marker):
+            return None
+        if marker not in response or response.count(marker) != 1:
+            return None
+        analysis = response[len(analysis_marker):response.index(marker)].strip()
+        if not analysis:
+            return None
+    elif not response.startswith(marker) or response.count(marker) != 1:
+        return None
+    final_section = response.split(marker, 1)[1].strip()
+    if not final_section.startswith("```"):
+        return None
+    value = extract_trailing_code_block(final_section)
+    if value is None or value.startswith("# ") or "```" in value:
+        return None
+    return value
+
+
 def parse_oss_gqm_response(response: str, expected_score_num: int) -> Optional[dict]:
     """Parse the trailing JSON score object from an OSS GQM response."""
     if not isinstance(response, str) or expected_score_num < 2:

@@ -1,8 +1,8 @@
 from typing import Union, List, Optional
 
 from inference.prompts import get_group_post_edit_prompt
-from inference.run_mt import _block_extractor
 from inference.run_rm_SQM import load_model_tokenizer
+from utils.helpers import extract_trailing_code_block as _block_extractor
 
 
 def func_call(

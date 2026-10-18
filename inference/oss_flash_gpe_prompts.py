@@ -36,9 +36,11 @@ Output exactly this Markdown structure:
 
 # Final Translation
 
+```
 [one complete final translation in {target_lang}]
+```
 
-Do not use code fences. Do not add text outside these two sections.
+The final translation must be the last content in the response and enclosed in a code block. Do not add text outside these two sections.
 
 Source language: {source_lang}
 Target language: {target_lang}

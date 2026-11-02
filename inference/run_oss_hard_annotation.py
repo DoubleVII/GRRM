@@ -34,17 +34,23 @@ def validate_annotation(value, item, *, max_span_chars=48, max_span_words=8):
 
 def annotate(items, model_path=DEFAULT_MODEL, *, model=None, examples_per_score=2,
              max_span_chars=48, max_span_words=8, **generation_options):
-    """Annotate source-only items; invalid responses use the shared OSS retry loop."""
+    """Annotate reference-assisted items; invalid responses use the shared OSS retry loop."""
     for name, limit in (("max_span_chars", max_span_chars), ("max_span_words", max_span_words)):
         if type(limit) is not int or limit < 1:
             raise ValueError(f"{name} must be a positive integer")
     sources, prompts = [], []
     for item in items:
-        for key in ("src_text", "src_lang", "trg_lang"):
+        for key in ("src_text", "src_lang", "trg_lang", "ref_text"):
             if not isinstance(item.get(key), str) or not item[key].strip():
                 raise ValueError(f"{key} must be a nonempty string")
         source = {key: item[key] for key in
-                  ("data_id", "row_id", "ltb_id", "src_text", "src_lang", "trg_lang") if key in item}
+                  ("data_id", "row_id", "ltb_id", "src_text", "src_lang", "trg_lang", "ref_text") if key in item}
+        comment = item.get("comment")
+        if comment is not None:
+            if not isinstance(comment, str):
+                raise ValueError("comment must be a string or None")
+            if comment.strip():
+                source["comment"] = comment
         sources.append(source)
         prompt = build_difficulty_prompt(source, examples_per_score=examples_per_score)
         prompts.append(prompt + f"\nAdditional output limits: each source_span must contain at most "
@@ -63,11 +69,12 @@ def annotate(items, model_path=DEFAULT_MODEL, *, model=None, examples_per_score=
             for item, result in zip(sources, results)]
 
 
-def main(src_text, src_lang, trg_lang, model_path=DEFAULT_MODEL, temperature=0.0,
+def main(src_text, src_lang, trg_lang, ref_text, model_path=DEFAULT_MODEL, temperature=0.0,
          top_p=1.0, max_tokens=8192, retry=3, reasoning_effort="medium",
-         examples_per_score=2, max_span_chars=48, max_span_words=8, vllm_kwargs=None):
+         examples_per_score=2, max_span_chars=48, max_span_words=8, vllm_kwargs=None, comment=None):
     """Annotate one source text and print the complete JSON result."""
-    output = annotate([dict(src_text=src_text, src_lang=src_lang, trg_lang=trg_lang)],
+    output = annotate([dict(src_text=src_text, src_lang=src_lang, trg_lang=trg_lang,
+                            ref_text=ref_text, comment=comment)],
         model_path, temperature=temperature, top_p=top_p, max_tokens=max_tokens,
         retry=retry, reasoning_effort=reasoning_effort, examples_per_score=examples_per_score,
         max_span_chars=max_span_chars, max_span_words=max_span_words, vllm_kwargs=vllm_kwargs)

@@ -1,4 +1,4 @@
-"""Annotate raw MT datasets without candidate translations or references."""
+"""Annotate MT difficulty using reference translations and optional expert comments."""
 import json
 from pathlib import Path
 
@@ -27,19 +27,24 @@ def load_items(data_id, data_dir=None, max_samples=0):
         else:
             raise ValueError(f"Unknown data_id: {did}; supply data_dir for custom datasets")
         frame = pd.read_parquet(path)
-        if "src_text" not in frame.columns:
-            raise ValueError(f"Missing src_text in {did}")
+        required = {"src_text", "trg_text"}
+        if required - set(frame.columns):
+            raise ValueError(f"Missing columns in {did}: {sorted(required - set(frame.columns))}")
         if max_samples:
             frame = frame.head(max_samples)
         if frame.empty:
             raise ValueError(f"No dataset rows selected for {did}")
         for row_id, row in enumerate(frame.to_dict("records")):
-            item = dict(data_id=did, row_id=row_id, src_text=row["src_text"])
+            item = dict(data_id=did, row_id=row_id, src_text=row["src_text"],
+                        ref_text=row["trg_text"])
             for key in ("src_lang", "trg_lang"):
                 item[key] = row.get(key) or (meta or {}).get(key)
-            for key in ("src_text", "src_lang", "trg_lang"):
+            for key in ("src_text", "src_lang", "trg_lang", "ref_text"):
                 if not isinstance(item[key], str) or not item[key].strip():
                     raise ValueError(f"Invalid {key} in {did}, row {row_id}")
+            comment = row.get("comment")
+            if comment is not None and pd.notna(comment) and str(comment).strip():
+                item["comment"] = str(comment)
             if "ltb_id" in row and pd.notna(row["ltb_id"]):
                 item["ltb_id"] = int(row["ltb_id"])
             items.append(item)

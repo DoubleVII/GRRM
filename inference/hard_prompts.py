@@ -66,7 +66,7 @@ def matching_prompt(prediction, golden):
 # repo-local parquet_data directory. Importing/rendering never reads those files.
 # These rows are in-context calibration examples: exclude them (and duplicate LTB
 # IDs across scarcity/generalization views) from held-out difficulty evaluation.
-DIFFICULTY_RUBRIC_VERSION = "source-difficulty-v1"
+DIFFICULTY_RUBRIC_VERSION = "reference-assisted-difficulty-v2"
 
 DIFFICULTY_LEVELS = {
     0: "No significant difficulty: ordinary comprehension and target-language phrasing suffice; annotate no spans.",
@@ -82,7 +82,7 @@ DIFFICULTY_LEVELS = {
     10: "Highest anchor: dense interacting cultural, lexical, structural, or wordplay mechanisms require extensive reconstruction; ordinary paraphrase loses essential function."
 }
 
-DIFFICULTY_SCORING_GUIDE = """Using only the source text, source language, and target language, assess the additional judgment needed for a faithful, natural translation that preserves essential pragmatic functions.
+DIFFICULTY_SCORING_GUIDE = """Using the source text, source language, target language, reference translation, and any expert comment, assess the additional judgment needed for a faithful, natural translation that preserves essential pragmatic functions.
 Evaluate this particular translation direction, including source comprehension and cross-language expression. Use a translator with ordinary bilingual competence as the common baseline; do not change the scale because a particular candidate failed or a model reports uncertainty.
 The scale applies to any language pair, including pairs without English or Chinese. Evaluate regional varieties, scripts, morphology, and target-language conventions when relevant; language identity or resource availability alone does not determine difficulty.
 Zero means no difficulty warrants separate annotation, so spans must be empty. Scores 1–10 indicate increasing difficulty. These are ordinal levels, not error probabilities or a ratio scale; 10 does not mean impossible to translate.
@@ -95,7 +95,7 @@ Every source_span must remain an exact contiguous substring. Never insert ellips
 The score for the entire text is the maximum span score, or 0 for an empty list. Do not add independent low-scoring issues. Anchor source_spans are concise lookup locations; rationale explains the highest difficulty in the text, and the listed spans need not be equally difficult.
 Multiple equally valid translations are not by themselves a reason for a high score. Identify decisions that could change meaning, logic, tone, or linguistic function. When information is missing, state what is missing instead of inventing a unique intended reading.
 The broad calibration trend is ltb_v1_eval >= ltb_v1_dev > seedx_challenge > wmt, not a constraint on individual items. Ordinary WMT text is usually 0; other datasets can also contain easy items.
-These are initial human-curated anchors selected from actual sources and reference notes, not scores validated by inter-annotator agreement or error rates. References and notes informed curation and are not inputs for new items.
+These are initial human-curated anchors selected from actual sources and reference notes, not scores validated by inter-annotator agreement or error rates. Use the reference translation and optional expert comment as evidence for intended meaning, cultural context, and translation decisions. Assess the difficulty of translating the source, not the quality of the reference; accept valid alternative translations and do not invent difficulties merely because a reference uses different wording. Expert comments may be absent. Locate all annotated spans in the source, never in the reference or comment.
 Examples from the requested direction are preferred when available; other directions provide fallback anchors so every selected score remains represented. Compare the underlying difficulty mechanism, not the dataset or language identity."""
 
 DIFFICULTY_EXAMPLES = [
@@ -484,12 +484,14 @@ def build_difficulty_rubric(*, format="text", scores=None, examples_per_score=2,
 
 
 def build_difficulty_prompt(item, *, format="text", scores=None, examples_per_score=2):
-    """Score using only source text and direction, with direction-aware anchors.
+    """Score source difficulty with reference context and direction-aware anchors.
 
-    Candidate/reference/comment fields are ignored. This is a new prompt contract;
-    legacy span validators and candidate-based evaluation do not validate scores.
+    Candidate fields are ignored; reference and optional comment provide context.
+    Legacy span validators and candidate-based evaluation do not validate scores.
     """
-    value = {key: item[key] for key in ("src_text", "src_lang", "trg_lang")}
+    value = {key: item[key] for key in ("src_text", "src_lang", "trg_lang", "ref_text")}
+    if item.get("comment"):
+        value["comment"] = item["comment"]
     rubric = build_difficulty_rubric(format=format, scores=scores,
                                      examples_per_score=examples_per_score,
                                      src_lang=value["src_lang"], trg_lang=value["trg_lang"])

@@ -1,7 +1,10 @@
-# Source-only OSS difficulty annotation
+# Reference-assisted OSS difficulty annotation
 
-Run from the repository root with the development environment. No candidate
-translation, reference, or reference comment is required or passed to the model.
+Run from the repository root with the development environment. The model receives
+the source, translation direction, reference translation,
+and optional expert `comment`. Candidate translations are not used. References
+and comments help identify intended meanings and translation difficulties; the
+model still scores source difficulty and quotes spans only from the source.
 The default model is `openai/gpt-oss-120b`; a local checkpoint can be supplied with
 `--model_path`. Generation uses the existing local vLLM/Harmony OSS adapter.
 
@@ -19,15 +22,20 @@ The default model is `openai/gpt-oss-120b`; a local checkpoint can be supplied w
 configured paths are used. With `data_dir`, the loader first looks for
 `<data_id>.parquet`, then for the configured path relative to `test_data_mt`.
 Custom IDs require `<data_dir>/<data_id>.parquet`. Required fields are `src_text`,
-`src_lang`, and `trg_lang`; fixed language directions can also come from the config.
+`src_lang`, `trg_lang`, and `trg_text` (reference translation); fixed language
+directions can also come from the config.
 `max_samples=0` selects all rows; other values select that many rows per dataset.
+References are passed to the model and saved as `ref_text`. The `comment` column
+is optional; missing, null, and blank comments are omitted from model context.
 Row IDs are zero-based parquet positions. LTB IDs are retained when present.
 
-Annotate a single text without a parquet dataset:
+Annotate a single text with its reference translation:
 
 ```bash
 .venv/bin/python -m inference.run_oss_hard_annotation \
   --src_text='我的老板除了CPU我什么也不会。' --src_lang=zh --trg_lang=en \
+  --ref_text='My boss only knows how to gaslight me.' \
+  --comment='CPU is slang for workplace psychological manipulation here.' \
   --vllm_kwargs='{"tensor_parallel_size": 4}'
 ```
 
@@ -52,3 +60,7 @@ candidate-error golden files and their evaluation scripts use a different
 contract and cannot directly consume them. Calibration examples are drawn from
 the test datasets; exclude those rows and duplicate LTB IDs from held-out
 calibration evaluation (provenance is in `DIFFICULTY_EXAMPLES`).
+
+Prompt version `reference-assisted-difficulty-v2` distinguishes these annotations
+from the earlier source-only annotations. Single-text CLI calls require
+`--ref_text`; `--comment` is optional.

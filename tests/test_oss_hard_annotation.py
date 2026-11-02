@@ -14,7 +14,8 @@ from inference.run_oss_hard_annotation import annotate, validate_annotation
 
 
 def item():
-    return dict(src_text="我的老板除了CPU我什么也不会。", src_lang="zh", trg_lang="en")
+    return dict(src_text="我的老板除了CPU我什么也不会。", src_lang="zh", trg_lang="en",
+                ref_text="My boss only knows how to gaslight me.")
 
 
 def annotation():
@@ -43,10 +44,15 @@ class OssHardAnnotationTests(unittest.TestCase):
     def test_raw_dataset_cli_artifacts_and_preflight(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            # Deliberately no reference/candidate columns; extra notes must not leak.
-            pd.DataFrame([dict(item(), comment="private note")]).to_parquet(root / "tiny.parquet")
+            # Parquet references use trg_text; the model receives ref_text.
+            row = item()
+            row["trg_text"] = row.pop("ref_text")
+            pd.DataFrame([dict(row, comment="expert note")]).to_parquet(root / "tiny.parquet")
             def fake_annotate(items, *args, **kwargs):
-                self.assertEqual(set(items[0]), {"data_id", "row_id", "src_text", "src_lang", "trg_lang"})
+                self.assertEqual(set(items[0]), {"data_id", "row_id", "src_text", "src_lang", "trg_lang",
+                                                "ref_text", "comment"})
+                self.assertEqual(items[0]["ref_text"], item()["ref_text"])
+                self.assertEqual(items[0]["comment"], "expert note")
                 return [dict(value, status="ok", result=annotation(), generation={}, error=None) for value in items]
             with patch("data.run_oss_hard_annotation.annotate", side_effect=fake_annotate) as generate:
                 main("tiny", root / "out", data_dir=root)
@@ -86,22 +92,50 @@ class OssHardAnnotationTests(unittest.TestCase):
         self.assertEqual(output[0]["result"], annotation())
         self.assertEqual(failed[0]["status"], "failed")
         self.assertIsNone(failed[0]["result"])
+        self.assertNotIn("comment", failed[0])
+        self.assertEqual(failed[0]["ref_text"], item()["ref_text"])
         self.assertIsNotNone(failed[0]["generation"]["response"])
-        for field in ("candidate", "ref_text", "comment"):
-            self.assertNotIn(field, output[0])
+        self.assertNotIn("candidate", output[0])
+        self.assertEqual(output[0]["ref_text"], "reference sentinel")
+        self.assertEqual(output[0]["comment"], "comment sentinel")
         for text in model.calls[0]:
-            self.assertNotIn("sentinel", text)
+            self.assertNotIn("candidate sentinel", text)
+            self.assertIn("reference sentinel", text)
+            self.assertIn("comment sentinel", text)
             self.assertIn("48 characters and 8 whitespace-separated words", text)
+
+    def test_optional_comments_and_required_reference(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            row = item()
+            row["trg_text"] = row.pop("ref_text")
+            for comment in (None, float("nan"), "", "   "):
+                pd.DataFrame([dict(row, comment=comment)]).to_parquet(root / "tiny.parquet")
+                self.assertNotIn("comment", load_items("tiny", root)[0])
+            pd.DataFrame([row]).to_parquet(root / "tiny.parquet")
+            self.assertNotIn("comment", load_items("tiny", root)[0])
+            for reference in (None, float("nan"), "", "   "):
+                pd.DataFrame([dict(row, trg_text=reference)]).to_parquet(root / "tiny.parquet")
+                with self.assertRaisesRegex(ValueError, "Invalid ref_text"):
+                    load_items("tiny", root)
+            del row["trg_text"]
+            pd.DataFrame([row]).to_parquet(root / "tiny.parquet")
+            with self.assertRaisesRegex(ValueError, "trg_text"):
+                load_items("tiny", root)
+        missing = item()
+        del missing["ref_text"]
+        with self.assertRaisesRegex(ValueError, "ref_text"):
+            annotate([missing])
 
     def test_relocated_configured_data_and_language_defaults(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             folder = root / "ltb-v1-eval-scarcity"
             folder.mkdir()
-            pd.DataFrame([dict(item(), ltb_id=111)]).to_parquet(folder / "high_resource.parquet")
+            pd.DataFrame([dict(item(), trg_text=item()["ref_text"], ltb_id=111)]).to_parquet(folder / "high_resource.parquet")
             rows = load_items("ltb_v1_eval_scarcity_high", root)
             self.assertEqual(rows[0]["ltb_id"], 111)
-            pd.DataFrame([dict(src_text="A plain headline")]).to_parquet(root / "wmt24_enzh.parquet")
+            pd.DataFrame([dict(src_text="A plain headline", trg_text="普通标题")]).to_parquet(root / "wmt24_enzh.parquet")
             rows = load_items("wmt24_enzh", root)
             self.assertEqual((rows[0]["src_lang"], rows[0]["trg_lang"]), ("en", "zh"))
 

@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 import pandas.core.arrays.arrow.extension_types  # initialize before patch.dict restores sys.modules
+import openai_harmony  # initialize the PyO3 extension before patch.dict restores sys.modules
 
 from data.run_inst_hard_candidates import load_items, main as candidate_main
 from data.run_hard_golden import main as golden_main
@@ -16,6 +17,8 @@ from eval.run_hard_eval import main as eval_main
 from inference.hard_generation import generate
 from inference.hard_prompts import build_prompt, golden_prompt, matching_prompt
 from inference.run_inst_hard_prediction import main as prediction_main, predict
+from inference.run_oss_hard_prediction import main as oss_prediction_main
+from eval.run_oss_hard_eval import main as oss_eval_main
 from utils.hard_protocol import (align, artifact_path, load, load_dataset_artifacts,
                                  output_paths, parse_data_ids, result_item, save, validate_spans)
 
@@ -107,6 +110,72 @@ class HardProtocolTests(unittest.TestCase):
         duplicate = spans()
         duplicate["spans"] *= 2
         self.assertIsNone(validate_spans(duplicate, item))
+
+    def test_case_and_line_break_tolerance_preserves_original_quotes(self):
+        item = {**sample(), "src_text": "Hello\r\nWORLD, Stra\u00dfe.\n\u6c49\n\u5b57",
+                "candidate": "GOOD\nMorning"}
+        value = dict(analysis="x", spans=[dict(source_span="hello world",
+                     explanation="x", translation_span="good morning", error_type="other")])
+        parsed = validate_spans(value, item, golden=True)
+        self.assertEqual(parsed["spans"][0]["source_span"], "Hello\r\nWORLD")
+        self.assertEqual(parsed["spans"][0]["translation_span"], "GOOD\nMorning")
+        self.assertEqual(value["spans"][0]["source_span"], "hello world")
+        for quote, expected in [("STRASSE", "Stra\u00dfe"), ("\u6c49\u5b57", "\u6c49\n\u5b57")]:
+            result = validate_spans(dict(analysis="x", spans=[dict(source_span=quote,
+                                    explanation="x")]), item)
+            self.assertEqual(result["spans"][0]["source_span"], expected)
+        for quote in ("Hello WORLD!", "Hello missing WORLD", "Goodbye"):
+            self.assertIsNone(validate_spans(dict(analysis="x", spans=[dict(
+                source_span=quote, explanation="x")]), item))
+        # Normalization must not let duplicate issues through.
+        duplicate = dict(analysis="x", spans=[dict(source_span=quote, explanation="x")
+                         for quote in ("hello world", "Hello\r\nWORLD")])
+        self.assertIsNone(validate_spans(duplicate, item))
+
+    def test_successful_items_survive_exhausted_retries(self):
+        class PartialModel:
+            def __init__(self):
+                self.calls = []
+
+            def generate(self, prompts, sampling_params):
+                self.calls.append(prompts)
+                outputs = []
+                for prompt in prompts:
+                    text = json.dumps(dict(index=0)) if prompt == "valid" else "invalid"
+                    outputs.append(SimpleNamespace(outputs=[SimpleNamespace(text=text, token_ids=text)]))
+                return outputs
+
+        model = PartialModel()
+        fake_vllm = SimpleNamespace(SamplingParams=lambda **kwargs: SimpleNamespace(**kwargs))
+        validator = lambda value: value if value == dict(index=0) else None
+        with patch.dict("sys.modules", {"vllm": fake_vllm}):
+            results = generate(["valid", "invalid"], [validator, validator],
+                backend="inst", model_path="test", model=engine(model), retry=2)
+        self.assertEqual(model.calls, [["valid", "invalid"], ["invalid"], ["invalid"]])
+        self.assertEqual(results[0]["parsed"], dict(index=0))
+        self.assertIsNone(results[1]["parsed"])
+        self.assertEqual(results[1]["raw_output"], "invalid")
+        oss = PartialModel()
+        encoding = SimpleNamespace(stop_tokens_for_assistant_actions=lambda: [])
+        with patch.dict("sys.modules", {"vllm": fake_vllm}), \
+                patch("inference.run_oss_SQM.load_encoding", return_value=encoding), \
+                patch("inference.run_oss_diverse_mt._prepare_inputs", side_effect=lambda prompts, *args: prompts), \
+                patch("inference.run_oss_diverse_mt._response_text", side_effect=lambda tokens, enc: (None, tokens)):
+            with self.assertWarns(UserWarning):
+                oss_results = generate(["valid", "invalid"], [validator, validator],
+                    backend="oss", model_path="test", model=oss, retry=2)
+        self.assertEqual(oss.calls, model.calls)
+        self.assertEqual(oss_results[0]["parsed"], dict(index=0))
+        self.assertIsNone(oss_results[1]["parsed"])
+        good, bad = successful(sample(), spans()), result_item(sample(1), results[1])
+        gold = [successful(sample(), spans(True)), successful(sample(1), spans(True))]
+        with patch("eval.hard_eval_core.generate", return_value=[dict(
+                parsed=dict(analysis="same", pairs=[[0, 0]]), response="", thinking=None)]):
+            output, summary = evaluate([good, bad], gold)
+        self.assertEqual([item["status"] for item in output], ["ok", "failed"])
+        self.assertEqual(summary["overall"]["valid"], 1)
+        self.assertEqual(summary["overall"]["failed"], 1)
+        self.assertEqual(summary["overall"]["f1"], 1)
 
     def test_artifact_validation_and_alignment(self):
         item = sample()
@@ -253,6 +322,53 @@ class HardProtocolTests(unittest.TestCase):
         self.assertEqual(summary["overall"]["valid"], 0)
         self.assertIsNone(items[0]["metrics"])
         self.assertEqual(items[0]["generation"]["response"], "malformed")
+
+    def test_oss_prediction_and_evaluation_entry_points(self):
+        fake_vllm = SimpleNamespace(SamplingParams=lambda **kwargs: SimpleNamespace(**kwargs))
+        model = FakeModel("oss", invalid_first=True)
+        encoding = SimpleNamespace(stop_tokens_for_assistant_actions=lambda: [])
+        with TemporaryDirectory() as directory, \
+                patch.dict("sys.modules", {"vllm": fake_vllm}), \
+                patch("inference.run_oss_SQM.init_oss_model", return_value=model), \
+                patch("inference.run_oss_SQM.load_encoding", return_value=encoding), \
+                patch("inference.run_oss_diverse_mt._prepare_inputs", side_effect=lambda prompts, *args: prompts) as prepare, \
+                patch("inference.run_oss_diverse_mt._response_text", side_effect=lambda tokens, enc: (None, tokens)):
+            root = Path(directory)
+            for did in ("tiny", "tiny2"):
+                good = {**sample(), "data_id": did}
+                bad = {**sample(1), "data_id": did, "candidate": None}
+                save(artifact_path(root, did, "candidates"), "candidates", {}, [good, bad])
+                save(artifact_path(root, did, "golden"), "golden", {},
+                     [successful(good, spans(True)), result_item(bad, error="translation failed")])
+            predictions, evaluation = str(root / "predictions"), str(root / "evaluation")
+            for mode in ("direct", "qe"):
+                oss_prediction_main("tiny,tiny2", directory, predictions, "test-oss", mode=mode,
+                                    retry=1, reasoning_effort="low")
+                self.assertEqual(prepare.call_args.args[2], "low")
+                for prompt in prepare.call_args.args[0]:
+                    self.assertNotIn(sample()["ref_text"], prompt)
+                    self.assertNotIn(sample()["comment"], prompt)
+                    if mode == "direct":
+                        self.assertNotIn(sample()["candidate"], prompt)
+                    else:
+                        self.assertIn(sample()["candidate"], prompt)
+                with patch("builtins.print") as console:
+                    oss_eval_main("tiny,tiny2", predictions, directory, evaluation, mode=mode)
+                aggregate = json.loads(console.call_args.args[0])["overall"]
+                self.assertEqual((aggregate["valid"], aggregate["failed"], aggregate["tp"]), (2, 2, 2))
+                for did in ("tiny", "tiny2"):
+                    pred = load(artifact_path(predictions, did, "predictions", mode), "predictions")
+                    self.assertEqual(pred["config"]["reasoning_effort"], "low")
+                    self.assertEqual([item["status"] for item in pred["items"]], ["ok", "failed"])
+                    scored = load(artifact_path(evaluation, did, "evaluation", mode), "evaluation")
+                    self.assertEqual(scored["summary"]["overall"]["f1"], 1)
+                    self.assertEqual(scored["summary"]["overall"]["coverage"], 0.5)
+            # First prediction retries once; each mode then has a judge call.
+            self.assertEqual(len(model.calls), 5)
+            with patch("inference.run_inst_hard_prediction.generate") as generator:
+                with self.assertRaises(FileExistsError):
+                    oss_prediction_main("tiny,tiny2", directory, predictions, mode="direct")
+                generator.assert_not_called()
 
     def test_all_four_stages_with_fake_models(self):
         fake_vllm = SimpleNamespace(SamplingParams=lambda **kwargs: SimpleNamespace(**kwargs))

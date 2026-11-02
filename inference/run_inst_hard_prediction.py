@@ -3,7 +3,8 @@ from inference.hard_prompts import build_prompt
 from utils.hard_protocol import (load_dataset_artifacts, normalize_bool, output_paths,
                                  parse_data_ids, result_item, save, valid_candidate, validate_spans)
 
-def predict(items, mode, model_path, **generation_options):
+def predict(items, mode, model_path, *, backend="inst", **generation_options):
+    """Shared prediction protocol; select the instruct or Harmony/OSS adapter."""
     # Validate mode even on empty input.
     if mode not in {"direct", "qe"}:
         raise ValueError("mode must be direct or qe")
@@ -11,7 +12,7 @@ def predict(items, mode, model_path, **generation_options):
     results = generate(
         [build_prompt(item, mode) for item in eligible],
         [lambda value, item=item: validate_spans(value, item) for item in eligible],
-        backend="inst", model_path=model_path, **generation_options)
+        backend=backend, model_path=model_path, **generation_options)
     iterator = iter(results)
     return [result_item(item, next(iterator)) if valid_candidate(item)
             else result_item(item, error="Candidate translation failed") for item in items]

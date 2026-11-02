@@ -1,5 +1,6 @@
 """Versioned artifacts and validated source spans for translation difficulty."""
 import json
+import re
 from pathlib import Path
 
 VERSION = 1
@@ -127,6 +128,47 @@ def parse_json(text):
         return None
 
 
+def canonical_quote(quote, text):
+    """Recover the original substring, tolerating case and line/space formatting.
+
+    The second pass also accepts line breaks inserted inside a word. Punctuation
+    and non-whitespace characters must still match; this is not fuzzy matching.
+    """
+    if not isinstance(quote, str) or not quote.strip():
+        return None
+    if quote in text:
+        return quote
+
+    def normalize(value, join_lines):
+        chars, positions = [], []
+        for match in re.finditer(r"\s+|\S", value):
+            token = match.group()
+            if token.isspace():
+                if join_lines and ("\n" in token or "\r" in token):
+                    continue
+                normalized = " "
+            else:
+                normalized = token.casefold()
+            for char in normalized:
+                chars.append(char)
+                positions.append((match.start(), match.end()))
+        return "".join(chars), positions
+
+    for join_lines in (False, True):
+        needle, _ = normalize(quote, join_lines)
+        needle = needle.strip()
+        haystack, positions = normalize(text, join_lines)
+        start = haystack.find(needle)
+        while needle and start >= 0:
+            end = start + len(needle)
+            # Do not match just half of a Unicode casefold expansion (e.g. ß).
+            if ((start == 0 or positions[start - 1] != positions[start])
+                    and (end == len(positions) or positions[end - 1] != positions[end])):
+                return text[positions[start][0]:positions[end - 1][1]]
+            start = haystack.find(needle, start + 1)
+    return None
+
+
 def validate_spans(value, item, golden=False):
     if not isinstance(value, dict) or not isinstance(value.get("analysis"), str):
         return None
@@ -134,12 +176,12 @@ def validate_spans(value, item, golden=False):
     if not isinstance(spans, list):
         return None
     seen = set()
+    canonical_spans = []
     for span in spans:
         if not isinstance(span, dict):
             return None
-        text = span.get("source_span")
-        if (not isinstance(text, str) or not text.strip()
-                or text not in item["src_text"]
+        text = canonical_quote(span.get("source_span"), item["src_text"])
+        if (text is None
                 or not isinstance(span.get("explanation"), str)
                 or not span["explanation"].strip()):
             return None
@@ -147,13 +189,21 @@ def validate_spans(value, item, golden=False):
         if marker in seen:
             return None
         seen.add(marker)
+        canonical = {**span, "source_span": text}
         if golden:
             error = span.get("translation_span")
-            if (not isinstance(error, str) or error not in item["candidate"]
-                    or span.get("error_type") not in {"omission", "addition", "other"}
-                    or (not error and span["error_type"] != "omission")):
+            if (not isinstance(error, str)
+                    or span.get("error_type") not in {"omission", "addition", "other"}):
                 return None
-    return value
+            if error == "" and span["error_type"] == "omission":
+                canonical["translation_span"] = ""
+            else:
+                error = canonical_quote(error, item["candidate"])
+                if error is None:
+                    return None
+                canonical["translation_span"] = error
+        canonical_spans.append(canonical)
+    return {**value, "spans": canonical_spans}
 
 
 def valid_candidate(item):

@@ -343,6 +343,56 @@ MT_TEST_DATA_META_INFO = {
         "trg_lang": None,
         "path": "parquet_data/test_data_mt/ltb-v1-generalization/out_of_distribution.parquet",
     },
+    "ltb_v1_eval_scarcity_high": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-eval-scarcity/high_resource.parquet",
+    },
+    "ltb_v1_eval_scarcity_medium": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-eval-scarcity/medium_resource.parquet",
+    },
+    "ltb_v1_eval_scarcity_low": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-eval-scarcity/low_resource.parquet",
+    },
+    "ltb_v1_eval_generalization_in_distribution": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-eval-generalization/in_distribution.parquet",
+    },
+    "ltb_v1_eval_generalization_out_of_distribution": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-eval-generalization/out_of_distribution.parquet",
+    },
+    "ltb_v1_dev_scarcity_high": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-dev-scarcity/high_resource.parquet",
+    },
+    "ltb_v1_dev_scarcity_medium": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-dev-scarcity/medium_resource.parquet",
+    },
+    "ltb_v1_dev_scarcity_low": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-dev-scarcity/low_resource.parquet",
+    },
+    "ltb_v1_dev_generalization_in_distribution": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-dev-generalization/in_distribution.parquet",
+    },
+    "ltb_v1_dev_generalization_out_of_distribution": {
+        "src_lang": None,
+        "trg_lang": None,
+        "path": "parquet_data/test_data_mt/ltb-v1-dev-generalization/out_of_distribution.parquet",
+    },
 }
 
 

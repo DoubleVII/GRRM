@@ -18,7 +18,7 @@ def predict(items, mode, model_path, *, backend="inst", **generation_options):
             else result_item(item, error="Candidate translation failed") for item in items]
 
 
-def main(data_id, candidates_dir, output_dir, model_path, mode="direct", temperature=0.0,
+def main(data_id, candidates_dir, output_dir, model_path, mode="direct", temperature=0.9,
          top_p=1.0, max_tokens=8192, retry=3, enable_thinking=False, vllm_kwargs=None):
     data_ids = parse_data_ids(data_id)
     paths = output_paths(data_ids, output_dir, "predictions", mode)

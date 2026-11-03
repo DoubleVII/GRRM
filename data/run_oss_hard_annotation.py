@@ -52,7 +52,7 @@ def load_items(data_id, data_dir=None, max_samples=0):
 
 
 def main(data_id, output_dir, model_path=DEFAULT_MODEL, data_dir=None, max_samples=0,
-         temperature=0.0, top_p=1.0, max_tokens=8192, retry=3, reasoning_effort="medium",
+         temperature=0.9, top_p=1.0, max_tokens=8192, retry=3, reasoning_effort="medium",
          examples_per_score=2, max_span_chars=48, max_span_words=8, vllm_kwargs=None):
     """Write one independent difficulty_annotations JSON artifact per dataset."""
     data_ids = parse_data_ids(data_id)

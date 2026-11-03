@@ -3,7 +3,7 @@ from utils.hard_protocol import parse_json
 
 
 def generate(prompts, validators, *, backend, model_path, model=None,
-             temperature=0.0, top_p=1.0, max_tokens=8192, retry=3,
+             temperature=0.9, top_p=1.0, max_tokens=8192, retry=3,
              enable_thinking=False, reasoning_effort="medium", vllm_kwargs=None):
     if retry < 0:
         raise ValueError("retry must be nonnegative")

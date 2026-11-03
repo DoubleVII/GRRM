@@ -17,7 +17,7 @@ def main():
     engine.model = recorder
     for mode in ['direct', 'qe']:
         recorder.start(f'{mode}.round0')
-        predictions = predict(candidates, mode, QWEN, model=engine, temperature=0.0,
+        predictions = predict(candidates, mode, QWEN, model=engine, temperature=0.9,
                               top_p=1.0, max_tokens=8192, retry=3)
         save_stage(output, 'predictions', predictions, mode)
 

@@ -63,7 +63,7 @@ def make_candidates(items, model_path, model=None, vllm_kwargs=None, **options):
 
 
 def main(data_id, output_dir, model_path, data_dir=None, max_samples=0,
-         temperature=0.0, top_p=1.0, max_tokens=8192, retry=3,
+         temperature=0.9, top_p=1.0, max_tokens=8192, retry=3,
          enable_thinking=False, prompt_version="codeblock", vllm_kwargs=None):
     data_ids = parse_data_ids(data_id)
     paths = output_paths(data_ids, output_dir, "candidates")

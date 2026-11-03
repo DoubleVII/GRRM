@@ -33,7 +33,7 @@ def main():
                              max_num_seqs=32, seed=20261102)
     recorder = Recorder(engine.model, output, 'inst')
     engine.model = recorder
-    options = dict(temperature=0.0, top_p=1.0, max_tokens=8192, retry=3)
+    options = dict(temperature=0.9, top_p=1.0, max_tokens=8192, retry=3)
     recorder.start('candidates')
     items = json.loads((root / 'selection.json').read_text())
     with patch('inference.run_inst_mt.build_translation_prompt', candidate_prompt):

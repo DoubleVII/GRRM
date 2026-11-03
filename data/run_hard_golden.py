@@ -2,7 +2,7 @@ from eval.hard_eval_core import DEFAULT_MODEL, annotate
 from utils.hard_protocol import load_dataset_artifacts, output_paths, parse_data_ids, save
 
 
-def main(data_id, candidates_dir, output_dir, model_path=DEFAULT_MODEL, temperature=0.0,
+def main(data_id, candidates_dir, output_dir, model_path=DEFAULT_MODEL, temperature=0.9,
          top_p=1.0, max_tokens=8192, retry=3, reasoning_effort="medium", vllm_kwargs=None):
     data_ids = parse_data_ids(data_id)
     paths = output_paths(data_ids, output_dir, "golden")

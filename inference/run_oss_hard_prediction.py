@@ -10,7 +10,7 @@ def predict(items, mode, model_path=DEFAULT_MODEL, **generation_options):
 
 
 def main(data_id, candidates_dir, output_dir, model_path=DEFAULT_MODEL, mode="direct",
-         temperature=0.0, top_p=1.0, max_tokens=8192, retry=3,
+         temperature=0.9, top_p=1.0, max_tokens=8192, retry=3,
          reasoning_effort="medium", vllm_kwargs=None):
     data_ids = parse_data_ids(data_id)
     paths = output_paths(data_ids, output_dir, "predictions", mode)

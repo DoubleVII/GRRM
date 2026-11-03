@@ -73,7 +73,7 @@ def save_stage(root, stage, items, mode=None, **extra):
         save(artifact_path(root, did, stage, mode), stage,
              dict(mode=mode, benchmark=True, seed=20261102,
                   model_path=QWEN if stage in {'candidates', 'predictions'} else OSS,
-                  temperature=0.0, max_tokens=8192, retry=3), selected, **dataset_extra)
+                  temperature=0.9, max_tokens=8192, retry=3), selected, **dataset_extra)
 
 
 def read_stage(root, stage, mode=None):
@@ -86,7 +86,7 @@ def run(args):
     root.mkdir(parents=True, exist_ok=True)
     kwargs = dict(gpu_memory_utilization=0.85, max_model_len=16384,
                   max_num_seqs=32, seed=20261102)
-    options = dict(temperature=0.0, top_p=1.0, max_tokens=8192, retry=3)
+    options = dict(temperature=0.9, top_p=1.0, max_tokens=8192, retry=3)
     if args.phase == 'qwen':
         import random
         from inference.run_inst_mt import init_inst_model

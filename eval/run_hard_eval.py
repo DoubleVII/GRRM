@@ -5,7 +5,7 @@ from utils.hard_protocol import load_dataset_artifacts, output_paths, parse_data
 
 
 def main(data_id, predictions_dir, golden_dir, output_dir, mode="direct", model_path=DEFAULT_MODEL,
-         temperature=0.0, top_p=1.0, max_tokens=8192, retry=3,
+         temperature=0.9, top_p=1.0, max_tokens=8192, retry=3,
          reasoning_effort="medium", vllm_kwargs=None):
     data_ids = parse_data_ids(data_id)
     paths = output_paths(data_ids, output_dir, "evaluation", mode)

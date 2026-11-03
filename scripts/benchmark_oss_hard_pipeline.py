@@ -23,7 +23,7 @@ def main(input_dir, output_dir):
             copy2(artifact_path(source, did, stage), artifact_path(output, did, stage))
     kwargs = dict(gpu_memory_utilization=0.85, max_model_len=16384,
                   max_num_seqs=32, seed=20261102, safetensors_load_strategy='eager')
-    options = dict(model_path=OSS, temperature=0.0, top_p=1.0, max_tokens=8192,
+    options = dict(model_path=OSS, temperature=0.9, top_p=1.0, max_tokens=8192,
                    retry=3, reasoning_effort='medium', vllm_kwargs=kwargs)
     dump(output / 'metadata.json', dict(input_dir=str(source), model=OSS, **{
         key: value for key, value in options.items() if key != 'model_path'},

@@ -36,7 +36,8 @@ def _input_paths(data_id, data_dir=None, input_file=None):
     return paths
 
 
-def load_items(data_id=None, data_dir=None, max_samples=0, input_file=None):
+def load_items(data_id=None, data_dir=None, max_samples=0, input_file=None,
+               require_reference=True):
     """Read a direct parquet file, configured paths, or a custom dataset directory."""
     import pandas as pd
     from utils.config import MT_TEST_DATA_META_INFO
@@ -47,7 +48,7 @@ def load_items(data_id=None, data_dir=None, max_samples=0, input_file=None):
     for did, path in _input_paths(data_id, data_dir, input_file).items():
         meta = MT_TEST_DATA_META_INFO.get(did)
         frame = pd.read_parquet(path)
-        required = {"src_text", "trg_text"}
+        required = {"src_text", "trg_text"} if require_reference else {"src_text"}
         if required - set(frame.columns):
             raise ValueError(f"Missing columns in {did}: {sorted(required - set(frame.columns))}")
         if max_samples:
@@ -55,14 +56,15 @@ def load_items(data_id=None, data_dir=None, max_samples=0, input_file=None):
         if frame.empty:
             raise ValueError(f"No dataset rows selected for {did}")
         for row_id, row in enumerate(frame.to_dict("records")):
-            item = dict(data_id=did, row_id=row_id, src_text=row["src_text"],
-                        ref_text=row["trg_text"])
+            item = dict(data_id=did, row_id=row_id, src_text=row["src_text"])
+            if require_reference:
+                item["ref_text"] = row["trg_text"]
             for key in ("src_lang", "trg_lang"):
                 item[key] = row.get(key) or (meta or {}).get(key)
-            for key in ("src_text", "src_lang", "trg_lang", "ref_text"):
+            for key in ("src_text", "src_lang", "trg_lang") + (("ref_text",) if require_reference else ()):
                 if not isinstance(item[key], str) or not item[key].strip():
                     raise ValueError(f"Invalid {key} in {did}, row {row_id}")
-            comment = row.get("comment")
+            comment = row.get("comment") if require_reference else None
             if comment is not None and pd.notna(comment) and str(comment).strip():
                 item["comment"] = str(comment)
             if "ltb_id" in row and pd.notna(row["ltb_id"]):

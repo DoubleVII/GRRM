@@ -35,7 +35,9 @@ def predict(items, mode, model_path, *, backend="inst", prompt_variant=None,
     results = generate(prompts,
         [lambda value, item=item: validate_annotation(value, item,
              max_span_chars=max_span_chars, max_span_words=max_span_words) for item in eligible],
-        backend=backend, model_path=model_path, **generation_options)
+        backend=backend, model_path=model_path,
+        response_format="analysis_codeblock" if variant == "analysis_codeblock" else "json",
+        **generation_options)
     if len(results) != len(eligible):
         raise ValueError("Prediction output count mismatch")
     iterator = iter(results)
@@ -66,7 +68,7 @@ def run(data_id, annotations_dir, output_dir, model_path, *, backend="inst", mod
     items = prediction_sources(annotations, mode, candidates)
     variant = prompt_variant or (DEFAULT_INST_VARIANT if backend == "inst" else "full")
     config = dict(model_path=model_path, backend=backend, mode=mode, prompt_variant=variant, failure_mode=failure_mode, runs=runs,
-                  examples_per_score=examples_per_score if variant == "full" else 1,
+                  examples_per_score=examples_per_score if variant in {"full", "full_schema", "analysis_codeblock"} else 1,
                   anchor_scores=[0, 6, 10] if variant == "compact3" else [0, 2, 4, 6, 8, 10],
                   max_span_chars=max_span_chars, max_span_words=max_span_words, **options)
     output = predict(items, mode, model_path, backend=backend, prompt_variant=variant,
@@ -84,6 +86,9 @@ def main(data_id, annotations_dir, output_dir, model_path, mode="direct", candid
          temperature=0.9, top_p=1.0, max_tokens=8192, retry=3, enable_thinking=False,
          prompt_variant=None, examples_per_score=2, max_span_chars=48, max_span_words=8,
          vllm_kwargs=None, failure_mode="strict", runs: int = 1):
+    """Predict difficulty; prompt_variant supports full, full_schema, analysis_codeblock,
+    compact6 and compact3. Qwen defaults to full; the other variants are opt-in.
+    """
     return run(data_id, annotations_dir, output_dir, model_path, mode=mode, failure_mode=failure_mode, runs=runs,
         candidates_dir=candidates_dir, prompt_variant=prompt_variant,
         examples_per_score=examples_per_score, max_span_chars=max_span_chars,

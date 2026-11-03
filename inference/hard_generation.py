@@ -1,10 +1,11 @@
 """Lazy model adapters, keeping artifact validation usable without GPU packages."""
-from utils.hard_protocol import parse_json
+from utils.difficulty_response import parse_prediction_response
 
 
 def generate(prompts, validators, *, backend, model_path, model=None,
              temperature=0.9, top_p=1.0, max_tokens=8192, retry=3,
-             enable_thinking=False, reasoning_effort="medium", vllm_kwargs=None):
+             enable_thinking=False, reasoning_effort="medium", vllm_kwargs=None,
+             response_format="json"):
     if retry < 0:
         raise ValueError("retry must be nonnegative")
     if not prompts:
@@ -12,7 +13,7 @@ def generate(prompts, validators, *, backend, model_path, model=None,
     if model is None and (not isinstance(model_path, str) or not model_path.strip()):
         raise ValueError('model_path must be explicitly provided when no model instance is supplied')
     def parser(text, index):
-        return validators[index](parse_json(text))
+        return validators[index](parse_prediction_response(text, response_format))
 
     if backend == "oss":
         from inference.run_oss_SQM import init_oss_model, load_encoding
@@ -45,6 +46,7 @@ def generate(prompts, validators, *, backend, model_path, model=None,
             retry=retry, parser_with_index=True)
         for result, attempts in zip(results, histories):
             result["attempts"] = attempts
+            result["response_format"] = response_format
         return results
     if backend != "inst":
         raise ValueError("Unknown backend")
@@ -73,4 +75,4 @@ def generate(prompts, validators, *, backend, model_path, model=None,
                 finish_reason=getattr(generated, "finish_reason", None)))
             results[i] = dict(parsed=parsed, response=answer,
                               thinking=thinking, raw_output=raw, attempts=histories[i])
-    return results
+    return [dict(result, response_format=response_format) for result in results]

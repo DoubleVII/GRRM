@@ -2,7 +2,7 @@
 import copy
 import json
 
-from utils.hard_protocol import parse_json
+from utils.difficulty_response import parse_prediction_response
 
 
 def valid_sample_score(value):
@@ -52,13 +52,14 @@ def resolve_prediction(prediction, *, failure_mode='strict', limits=None):
     if previous in ('relaxed', 'empty') and valid_sample_score(prediction.get('result')):
         return copy.deepcopy(prediction)
     generation = prediction.get('generation') or {}
+    response_format = generation.get('response_format', 'json')
     attempts = generation.get('attempts', [])
     # A currently stored result is the latest answer when available. Otherwise
     # search actual retry responses newest first, never using gold evidence.
     candidates = [(None, prediction.get('result'))]
-    candidates += [(a.get('attempt', i), parse_json(a.get('response')))
+    candidates += [(a.get('attempt', i), parse_prediction_response(a.get('response'), response_format))
                    for i, a in reversed(list(enumerate(attempts)))]
-    candidates.append((None, parse_json(generation.get('response'))))
+    candidates.append((None, parse_prediction_response(generation.get('response'), response_format)))
     for attempt, value in candidates:
         if valid_sample_score(value):
             result = copy.deepcopy(value)

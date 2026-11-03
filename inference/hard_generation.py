@@ -9,6 +9,8 @@ def generate(prompts, validators, *, backend, model_path, model=None,
         raise ValueError("retry must be nonnegative")
     if not prompts:
         return []
+    if model is None and (not isinstance(model_path, str) or not model_path.strip()):
+        raise ValueError('model_path must be explicitly provided when no model instance is supplied')
     def parser(text, index):
         return validators[index](parse_json(text))
 
@@ -17,10 +19,33 @@ def generate(prompts, validators, *, backend, model_path, model=None,
         from inference.run_oss_diverse_mt import _generate_with_retries, _prepare_inputs
         model = model if model is not None else init_oss_model(model_path, **(vllm_kwargs or {}))
         encoding = load_encoding()
-        return _generate_with_retries(
-            model, _prepare_inputs(prompts, encoding, reasoning_effort), parser, encoding,
+        histories = [[] for _ in prompts]
+        pending = list(range(len(prompts)))
+        class RecordingModel:
+            def generate(self, inputs, sampling_params):
+                from inference.run_oss_diverse_mt import _response_text
+                outputs = model.generate(inputs, sampling_params=sampling_params)
+                for index, output in zip(pending, outputs):
+                    generated = output.outputs[0]
+                    thinking, response = _response_text(generated.token_ids, encoding)
+                    histories[index].append(dict(response=response, thinking=thinking,
+                        raw_output=getattr(generated, "text", None), valid=False,
+                        temperature=sampling_params.temperature, output_tokens=len(generated.token_ids),
+                        finish_reason=getattr(generated, "finish_reason", None)))
+                return outputs
+        def recording_parser(text, index):
+            parsed = parser(text, index)
+            histories[index][-1]["valid"] = parsed is not None
+            if parsed is not None:
+                pending.remove(index)
+            return parsed
+        results = _generate_with_retries(
+            RecordingModel(), _prepare_inputs(prompts, encoding, reasoning_effort), recording_parser, encoding,
             temperature=temperature, top_p=top_p, max_tokens=max_tokens,
             retry=retry, parser_with_index=True)
+        for result, attempts in zip(results, histories):
+            result["attempts"] = attempts
+        return results
     if backend != "inst":
         raise ValueError("Unknown backend")
     from vllm import SamplingParams
@@ -29,6 +54,7 @@ def generate(prompts, validators, *, backend, model_path, model=None,
     engine = model if model is not None else init_inst_model(model_path, **(vllm_kwargs or {}))
     rendered = [_render_prompt(engine, prompt, enable_thinking) for prompt in prompts]
     results = [dict(parsed=None, response=None, thinking=None, raw_output=None) for _ in prompts]
+    histories = [[] for _ in prompts]
     for attempt in range(retry + 1):
         pending = [i for i, result in enumerate(results) if result["parsed"] is None]
         if not pending:
@@ -38,6 +64,13 @@ def generate(prompts, validators, *, backend, model_path, model=None,
         for i, output in zip(pending, outputs):
             raw = output.outputs[0].text
             thinking, answer = split_thinking(raw)
-            results[i] = dict(parsed=parser(answer, i), response=answer,
-                              thinking=thinking, raw_output=raw)
+            parsed = parser(answer, i)
+            generated = output.outputs[0]
+            histories[i].append(dict(response=answer, thinking=thinking, raw_output=raw,
+                valid=parsed is not None, temperature=min(1.0, temperature + 0.1 * attempt),
+                output_tokens=len(generated.token_ids)
+                    if getattr(generated, "token_ids", None) is not None else None,
+                finish_reason=getattr(generated, "finish_reason", None)))
+            results[i] = dict(parsed=parsed, response=answer,
+                              thinking=thinking, raw_output=raw, attempts=histories[i])
     return results

@@ -1,4 +1,4 @@
-"""Evaluate OSS difficulty predictions against frozen golden annotations.
+"""Evaluate scored OSS predictions against reference-assisted difficulty annotations.
 
 Uses the same OSS semantic judge and deterministic scoring as run_hard_eval.
 """

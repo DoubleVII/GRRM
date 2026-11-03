@@ -1,26 +1,51 @@
+"""Evaluate scored predictions against reference-assisted difficulty annotations."""
 import json
+from pathlib import Path
 
-from eval.hard_eval_core import DEFAULT_MODEL, evaluate, summarize
-from utils.hard_protocol import load_dataset_artifacts, output_paths, parse_data_ids, save
+from eval.difficulty_eval_core import evaluate, grouped_summary
+from utils.difficulty_protocol import load_annotations, load_predictions, save_artifact
+from utils.hard_protocol import output_paths, parse_data_ids, normalize_bool, check_output
 
 
-def main(data_id, predictions_dir, golden_dir, output_dir, mode="direct", model_path=DEFAULT_MODEL,
+def main(data_id, predictions_dir, annotations_dir, output_dir, mode="direct", model_path=None,
          temperature=0.9, top_p=1.0, max_tokens=8192, retry=3,
-         reasoning_effort="medium", vllm_kwargs=None):
+         reasoning_effort="medium", vllm_kwargs=None, score_only=False, exclude_calibration=True,
+         failure_mode="auto"):
+    if failure_mode not in ('auto', 'strict', 'fallback'):
+        raise ValueError('failure_mode must be auto, strict or fallback')
     data_ids = parse_data_ids(data_id)
     paths = output_paths(data_ids, output_dir, "evaluation", mode)
-    predictions, prediction_configs = load_dataset_artifacts(data_ids, predictions_dir, "predictions", mode)
-    golden, golden_configs = load_dataset_artifacts(data_ids, golden_dir, "golden")
+    summary_path = Path(output_dir) / f"{mode}.summary.json"
+    check_output(summary_path)
+    predictions, prediction_configs = load_predictions(data_ids, predictions_dir, mode)
+    run_counts = {config.get('runs', 1) for config in prediction_configs.values()}
+    if len(run_counts) != 1:
+        raise ValueError('Datasets must have the same prediction runs for joint evaluation')
+    runs = run_counts.pop()
+    golden, golden_configs = load_annotations(data_ids, annotations_dir)
+    # Honor each dataset's saved prediction and annotation span limits.
+    score_only, exclude_calibration = normalize_bool(score_only), normalize_bool(exclude_calibration)
     options = dict(temperature=temperature, top_p=top_p, max_tokens=max_tokens,
                    retry=retry, reasoning_effort=reasoning_effort, vllm_kwargs=vllm_kwargs)
-    items, summary = evaluate(predictions, golden, model_path, **options)
+    def limits(configs, item):
+        return {k: configs[item["data_id"]][k] for k in ("max_span_chars", "max_span_words")
+                if k in configs[item["data_id"]]}
+    items, summary = evaluate(predictions, golden, model_path,
+        score_only=score_only, exclude_calibration=exclude_calibration,
+        prediction_limits=lambda item: limits(prediction_configs, item),
+        reference_limits=lambda item: limits(golden_configs, item),
+        failure_mode=lambda item: (prediction_configs[item['data_id']].get('failure_mode', 'strict')
+                                   if failure_mode == 'auto' else failure_mode), **options)
     for did, path in paths.items():
         selected = [item for item in items if item["data_id"] == did]
-        save(path, "evaluation", dict(model_path=model_path, data_id=did, mode=mode, **options,
-             prediction_config=prediction_configs[did], golden_config=golden_configs[did]),
-             selected, summary=dict(overall=summarize(selected),
-                                    by_dataset={did: summary["by_dataset"][did]}))
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
+        save_artifact(path, "evaluation", dict(model_path=model_path, data_id=did, mode=mode, **options,
+            score_only=score_only, exclude_calibration=exclude_calibration, failure_mode=failure_mode, runs=runs,
+            prediction_config=prediction_configs[did], annotation_config=golden_configs[did]),
+            selected, summary=grouped_summary(selected))
+    with summary_path.open("x", encoding="utf-8") as stream:
+        json.dump(summary, stream, ensure_ascii=False, indent=2, allow_nan=False)
+    print(json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False))
+    return summary
 
 
 if __name__ == "__main__":

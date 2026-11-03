@@ -4,7 +4,6 @@ import json
 from inference.hard_generation import generate
 from inference.hard_prompts import build_difficulty_prompt
 
-DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 
 def validate_annotation(value, item, *, max_span_chars=48, max_span_words=8):
@@ -32,7 +31,7 @@ def validate_annotation(value, item, *, max_span_chars=48, max_span_words=8):
     return dict(analysis=value["analysis"], score=value["score"], spans=spans)
 
 
-def annotate(items, model_path=DEFAULT_MODEL, *, model=None, examples_per_score=2,
+def annotate(items, model_path=None, *, model=None, examples_per_score=2,
              max_span_chars=48, max_span_words=8, **generation_options):
     """Annotate reference-assisted items; invalid responses use the shared OSS retry loop."""
     for name, limit in (("max_span_chars", max_span_chars), ("max_span_words", max_span_words)):
@@ -69,7 +68,7 @@ def annotate(items, model_path=DEFAULT_MODEL, *, model=None, examples_per_score=
             for item, result in zip(sources, results)]
 
 
-def main(src_text, src_lang, trg_lang, ref_text, model_path=DEFAULT_MODEL, temperature=0.9,
+def main(src_text, src_lang, trg_lang, ref_text, model_path, temperature=0.9,
          top_p=1.0, max_tokens=8192, retry=3, reasoning_effort="medium",
          examples_per_score=2, max_span_chars=48, max_span_words=8, vllm_kwargs=None, comment=None):
     """Annotate one source text and print the complete JSON result."""

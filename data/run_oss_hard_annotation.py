@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from inference.hard_prompts import DIFFICULTY_RUBRIC_VERSION
-from inference.run_oss_hard_annotation import DEFAULT_MODEL, annotate
+from inference.run_oss_hard_annotation import annotate
 from utils.hard_protocol import check_output, parse_data_ids
 
 
@@ -51,7 +51,7 @@ def load_items(data_id, data_dir=None, max_samples=0):
     return items
 
 
-def main(data_id, output_dir, model_path=DEFAULT_MODEL, data_dir=None, max_samples=0,
+def main(data_id, output_dir, model_path, data_dir=None, max_samples=0,
          temperature=0.9, top_p=1.0, max_tokens=8192, retry=3, reasoning_effort="medium",
          examples_per_score=2, max_span_chars=48, max_span_words=8, vllm_kwargs=None):
     """Write one independent difficulty_annotations JSON artifact per dataset."""

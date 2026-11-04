@@ -10,7 +10,14 @@ from utils.hard_protocol import output_paths, parse_data_ids, normalize_bool, ch
 def main(data_id, predictions_dir, annotations_dir, output_dir, mode="direct", model_path=None,
          temperature=0.9, top_p=1.0, max_tokens=8192, retry=3,
          reasoning_effort="medium", vllm_kwargs=None, score_only=False, exclude_calibration=True,
-         failure_mode="auto"):
+         failure_mode="auto", span_backend="llm", span_proxy_options=None):
+    """Use span_backend=heuristic for local overlap rewards; llm preserves semantic matching.
+
+    span_proxy_options accepts a dict, e.g. {"unit":"token","method":"dice"}.
+    The heuristic defaults were selected on source-disjoint development data.
+    """
+    if span_backend not in ('llm', 'heuristic'):
+        raise ValueError('span_backend must be llm or heuristic')
     if failure_mode not in ('auto', 'strict', 'fallback'):
         raise ValueError('failure_mode must be auto, strict or fallback')
     data_ids = parse_data_ids(data_id)
@@ -26,7 +33,7 @@ def main(data_id, predictions_dir, annotations_dir, output_dir, mode="direct", m
     # Honor each dataset's saved prediction and annotation span limits.
     score_only, exclude_calibration = normalize_bool(score_only), normalize_bool(exclude_calibration)
     print(f"Evaluation: datasets={len(data_ids)}; predictions={len(predictions)}; "
-          f"runs={runs}; score_only={score_only}", flush=True)
+          f"runs={runs}; score_only={score_only}; span_backend={span_backend}", flush=True)
     options = dict(temperature=temperature, top_p=top_p, max_tokens=max_tokens,
                    retry=retry, reasoning_effort=reasoning_effort, vllm_kwargs=vllm_kwargs)
     def limits(configs, item):
@@ -34,6 +41,7 @@ def main(data_id, predictions_dir, annotations_dir, output_dir, mode="direct", m
                 if k in configs[item["data_id"]]}
     items, summary = evaluate(predictions, golden, model_path,
         score_only=score_only, exclude_calibration=exclude_calibration,
+        span_backend=span_backend, span_proxy_options=span_proxy_options,
         prediction_limits=lambda item: limits(prediction_configs, item),
         reference_limits=lambda item: limits(golden_configs, item),
         failure_mode=lambda item: (prediction_configs[item['data_id']].get('failure_mode', 'strict')
@@ -42,6 +50,7 @@ def main(data_id, predictions_dir, annotations_dir, output_dir, mode="direct", m
         selected = [item for item in items if item["data_id"] == did]
         save_artifact(path, "evaluation", dict(model_path=model_path, data_id=did, mode=mode, **options,
             score_only=score_only, exclude_calibration=exclude_calibration, failure_mode=failure_mode, runs=runs,
+            span_backend=span_backend, span_proxy_options=span_proxy_options,
             prediction_config=prediction_configs[did], annotation_config=golden_configs[did]),
             selected, summary=grouped_summary(selected))
     with summary_path.open("x", encoding="utf-8") as stream:

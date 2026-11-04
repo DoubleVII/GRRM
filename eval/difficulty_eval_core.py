@@ -118,7 +118,9 @@ def average_run_summaries(summaries):
 
 def evaluate(predictions, golden, model_path=None, *, score_only=False,
              exclude_calibration=True, prediction_limits=None, reference_limits=None,
-             failure_mode='strict', **options):
+             failure_mode='strict', span_backend='llm', span_proxy_options=None, **options):
+    if span_backend not in ('llm', 'heuristic'):
+        raise ValueError('span_backend must be llm or heuristic')
     left, right = indexed(predictions, repeated=True), indexed(golden)
     run_ids = {key[2] for key in left}
     if (run_ids and run_ids != set(range(max(run_ids)+1))) or any(
@@ -164,6 +166,14 @@ def evaluate(predictions, golden, model_path=None, *, score_only=False,
         if score_only:
             continue
         n, m = len(p["spans"]), len(g["spans"])
+        if span_backend == 'heuristic':
+            from eval.span_proxy import score_spans
+            proxy = score_spans(prediction['src_text'], p['spans'], g['spans'],
+                                **(span_proxy_options or {}))
+            item.update(span_status='ok', both_empty=n == m == 0,
+                        metrics={k: proxy[k] for k in ('tp', 'fp', 'fn', 'precision', 'recall', 'f1')},
+                        result=dict(backend='heuristic', **proxy))
+            continue
         if not n or not m:
             item.update(span_status="ok", result=dict(pairs=[], matching=[]),
                         metrics=metrics(0, n, m, empty_item=n == m == 0), both_empty=n == m == 0)

@@ -11,12 +11,13 @@ def main(data_id, predictions_dir, annotations_dir, output_dir, mode="direct", m
          temperature=0.9, top_p=1.0, max_tokens=8192, retry=3,
          reasoning_effort="medium", vllm_kwargs=None, score_only=False, exclude_calibration=True,
          failure_mode="auto", span_backend="llm", span_proxy_options=None,
-         span_prompt_variant="pairwise"):
+         span_prompt_variant="pairwise", span_match_policy="semantic"):
     """Use span_backend=heuristic for local overlap rewards; llm preserves semantic matching.
 
     span_proxy_options accepts a dict, e.g. {"unit":"token","method":"dice"}.
     The heuristic defaults were selected on source-disjoint development data.
     span_backend=inst uses a small instruct judge with native thinking disabled.
+    span_match_policy=localization asks OSS to ignore translation-solution correctness.
     """
     if span_backend not in ('llm', 'heuristic', 'inst'):
         raise ValueError('span_backend must be llm, heuristic or inst')
@@ -45,6 +46,7 @@ def main(data_id, predictions_dir, annotations_dir, output_dir, mode="direct", m
         score_only=score_only, exclude_calibration=exclude_calibration,
         span_backend=span_backend, span_proxy_options=span_proxy_options,
         span_prompt_variant=span_prompt_variant,
+        span_match_policy=span_match_policy,
         prediction_limits=lambda item: limits(prediction_configs, item),
         reference_limits=lambda item: limits(golden_configs, item),
         failure_mode=lambda item: (prediction_configs[item['data_id']].get('failure_mode', 'strict')
@@ -55,6 +57,7 @@ def main(data_id, predictions_dir, annotations_dir, output_dir, mode="direct", m
             score_only=score_only, exclude_calibration=exclude_calibration, failure_mode=failure_mode, runs=runs,
             span_backend=span_backend, span_proxy_options=span_proxy_options,
             span_prompt_variant=span_prompt_variant,
+            span_match_policy=span_match_policy,
             prediction_config=prediction_configs[did], annotation_config=golden_configs[did]),
             selected, summary=grouped_summary(selected))
     with summary_path.open("x", encoding="utf-8") as stream:

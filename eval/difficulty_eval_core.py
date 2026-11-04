@@ -118,9 +118,15 @@ def average_run_summaries(summaries):
 
 def evaluate(predictions, golden, model_path=None, *, score_only=False,
              exclude_calibration=True, prediction_limits=None, reference_limits=None,
-             failure_mode='strict', span_backend='llm', span_proxy_options=None, **options):
-    if span_backend not in ('llm', 'heuristic'):
-        raise ValueError('span_backend must be llm or heuristic')
+             failure_mode='strict', span_backend='llm', span_proxy_options=None,
+             span_prompt_variant='pairwise', **options):
+    if span_backend not in ('llm', 'heuristic', 'inst'):
+        raise ValueError('span_backend must be llm, heuristic or inst')
+    if span_backend == 'inst':
+        from eval.span_judge import matching_prompt as instruct_prompt, validate_pair_decision
+        if span_prompt_variant != 'pairwise':
+            raise ValueError('Only span_prompt_variant=pairwise is supported')
+    pairwise = span_backend == 'inst'
     left, right = indexed(predictions, repeated=True), indexed(golden)
     run_ids = {key[2] for key in left}
     if (run_ids and run_ids != set(range(max(run_ids)+1))) or any(
@@ -179,12 +185,32 @@ def evaluate(predictions, golden, model_path=None, *, score_only=False,
                         metrics=metrics(0, n, m, empty_item=n == m == 0), both_empty=n == m == 0)
             continue
         pending.append((len(items)-1, n, m))
-        prompts.append(matching_prompt(prediction, gold))
-        validators.append(lambda value, n=n, m=m: validate_pairs(value, n, m))
-    results = generate(prompts, validators, backend="oss", model_path=model_path, **options) if prompts else []
-    if len(results) != len(pending):
+        if span_backend == 'inst':
+            for ps in p['spans']:
+                for gs in g['spans']:
+                    prompts.append(instruct_prompt(prediction, [ps], [gs],
+                                                   relaxed=prediction.get('acceptance') == 'relaxed'))
+                    validators.append(validate_pair_decision)
+        else:
+            prompts.append(matching_prompt(prediction, gold))
+            validators.append(lambda value, n=n, m=m: validate_pairs(value, n, m))
+    if span_backend == 'inst':
+        options = dict(options, enable_thinking=False,
+                       response_format='json')
+    results = generate(prompts, validators, backend='inst' if span_backend == 'inst' else 'oss',
+                       model_path=model_path, **options) if prompts else []
+    if len(results) != len(prompts):
         raise ValueError("Semantic matching output count mismatch")
-    for (index, n, m), result in zip(pending, results):
+    iterator = iter(results)
+    for index, n, m in pending:
+        if pairwise:
+            subresults = [next(iterator) for _ in range(n*m)]
+            valid = all(r.get('parsed') is not None for r in subresults)
+            pairs = [[i//m, i % m] for i, r in enumerate(subresults) if r.get('parsed') and r['parsed']['match']]
+            result = dict(parsed=dict(analysis='Independent pair decisions.', pairs=pairs) if valid else None,
+                          pair_results=subresults)
+        else:
+            result = next(iterator)
         item = items[index]
         item["generation"] = result
         if result.get("parsed") is None:

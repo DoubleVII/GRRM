@@ -25,6 +25,8 @@ def generate(prompts, validators, *, backend, model_path, model=None,
         class RecordingModel:
             def generate(self, inputs, sampling_params):
                 from inference.run_oss_diverse_mt import _response_text
+                print(f"Generation (oss): pending={len(inputs)}/{len(prompts)}; "
+                      f"temperature={sampling_params.temperature}", flush=True)
                 outputs = model.generate(inputs, sampling_params=sampling_params)
                 for index, output in zip(pending, outputs):
                     generated = output.outputs[0]
@@ -61,6 +63,8 @@ def generate(prompts, validators, *, backend, model_path, model=None,
         pending = [i for i, result in enumerate(results) if result["parsed"] is None]
         if not pending:
             break
+        print(f"Generation (inst): attempt={attempt + 1}/{retry + 1}; "
+              f"pending={len(pending)}/{len(prompts)}", flush=True)
         outputs = engine.model.generate([rendered[i] for i in pending], SamplingParams(
             temperature=min(1.0, temperature + 0.1 * attempt), top_p=top_p, max_tokens=max_tokens))
         for i, output in zip(pending, outputs):

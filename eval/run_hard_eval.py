@@ -25,6 +25,8 @@ def main(data_id, predictions_dir, annotations_dir, output_dir, mode="direct", m
     golden, golden_configs = load_annotations(data_ids, annotations_dir)
     # Honor each dataset's saved prediction and annotation span limits.
     score_only, exclude_calibration = normalize_bool(score_only), normalize_bool(exclude_calibration)
+    print(f"Evaluation: datasets={len(data_ids)}; predictions={len(predictions)}; "
+          f"runs={runs}; score_only={score_only}", flush=True)
     options = dict(temperature=temperature, top_p=top_p, max_tokens=max_tokens,
                    retry=retry, reasoning_effort=reasoning_effort, vllm_kwargs=vllm_kwargs)
     def limits(configs, item):
@@ -44,10 +46,18 @@ def main(data_id, predictions_dir, annotations_dir, output_dir, mode="direct", m
             selected, summary=grouped_summary(selected))
     with summary_path.open("x", encoding="utf-8") as stream:
         json.dump(summary, stream, ensure_ascii=False, indent=2, allow_nan=False)
-    print(json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False))
+    # Log one compact line per group; detailed per-run statistics stay in JSON.
+    for label, value in [("overall (pooled)", summary['overall']), *summary['by_dataset'].items()]:
+        scores, spans = value['scores'], value['spans']
+        brief = dict(included=value['included'], excluded=value['excluded'],
+            score_failed=scores['failed'], mae=scores['mae'], rmse=scores['rmse'],
+            spearman=scores['spearman'], span_failed=spans['failed'],
+            precision=spans['precision'], recall=spans['recall'], f1=spans['f1'])
+        print(f"Evaluation {label}: {json.dumps(brief, ensure_ascii=False, allow_nan=False)}", flush=True)
+    print(f"Evaluation summary saved: {summary_path}", flush=True)
     return summary
 
 
 if __name__ == "__main__":
     import fire
-    fire.Fire(main)
+    fire.Fire(main, serialize=lambda result: None)

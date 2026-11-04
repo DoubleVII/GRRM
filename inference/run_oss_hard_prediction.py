@@ -22,4 +22,5 @@ def main(data_id, annotations_dir, output_dir, model_path, mode="direct",
 
 if __name__ == "__main__":
     import fire
-    fire.Fire(main)
+    # Keep the Python return value without dumping full artifacts into CLI logs.
+    fire.Fire(main, serialize=lambda result: None)

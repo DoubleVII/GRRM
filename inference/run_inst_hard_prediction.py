@@ -71,14 +71,20 @@ def run(data_id, annotations_dir, output_dir, model_path, *, backend="inst", mod
                   examples_per_score=examples_per_score if variant in {"full", "full_schema", "analysis_codeblock"} else 1,
                   anchor_scores=[0, 6, 10] if variant == "compact3" else [0, 2, 4, 6, 8, 10],
                   max_span_chars=max_span_chars, max_span_words=max_span_words, **options)
+    print(f"Prediction: backend={backend}; mode={mode}; sources={len(items)}; runs={runs}; "
+          f"requests={len(items) * runs}", flush=True)
     output = predict(items, mode, model_path, backend=backend, prompt_variant=variant,
         examples_per_score=examples_per_score, max_span_chars=max_span_chars,
         max_span_words=max_span_words, failure_mode=failure_mode, runs=runs, **options)
     for did, path in paths.items():
+        selected = [item for item in output if item["data_id"] == did]
         save_artifact(path, "predictions", dict(config, data_id=did,
             annotation_config=annotation_configs[did],
             candidate_config=candidate_configs[did] if candidate_configs else None),
-            [item for item in output if item["data_id"] == did])
+            selected)
+        counts = {kind: sum(item['acceptance'] == kind for item in selected)
+                  for kind in ('strict', 'relaxed', 'empty', 'failed')}
+        print(f"Predictions saved: {path}; items={len(selected)}; acceptance={counts}", flush=True)
     return output
 
 
@@ -99,4 +105,5 @@ def main(data_id, annotations_dir, output_dir, model_path, mode="direct", candid
 
 if __name__ == "__main__":
     import fire
-    fire.Fire(main)
+    # Full records are already saved as artifacts; Fire otherwise prints every record.
+    fire.Fire(main, serialize=lambda result: None)

@@ -7,4 +7,4 @@ from eval.run_hard_eval import main
 
 if __name__ == "__main__":
     import fire
-    fire.Fire(main)
+    fire.Fire(main, serialize=lambda result: None)

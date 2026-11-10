@@ -84,15 +84,24 @@ def extract_before_cot(response: str) -> Optional[str]:
     return response
 
 
-def split_thinking(text: str) -> tuple[Optional[str], str]:
-    """Split optional think tags, including completions with only a closing tag."""
+def validate_think_tag(think_tag: str) -> str:
+    """Validate a tag name supplied without angle brackets."""
+    if not isinstance(think_tag, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", think_tag):
+        raise ValueError("think_tag must match [A-Za-z][A-Za-z0-9_-]* (without angle brackets)")
+    return think_tag
+
+
+def split_thinking(text: str, think_tag: str = "think") -> tuple[Optional[str], str]:
+    """Split optional tags, including completions with only a closing tag."""
+    validate_think_tag(think_tag)
+    opening, closing = f"<{think_tag}>", f"</{think_tag}>"
     text = (text or "").strip()
-    match = re.match(r"^\s*<think>(.*?)</think>\s*(.*)$", text, re.DOTALL)
+    match = re.match(rf"^\s*{re.escape(opening)}(.*?){re.escape(closing)}\s*(.*)$", text, re.DOTALL)
     if match:
         return match.group(1).strip() or None, match.group(2).strip()
-    if "</think>" in text:
-        thinking, answer = text.split("</think>", 1)
-        return thinking.removeprefix("<think>").strip() or None, answer.strip()
+    if closing in text:
+        thinking, answer = text.split(closing, 1)
+        return thinking.removeprefix(opening).strip() or None, answer.strip()
     return None, text
 
 

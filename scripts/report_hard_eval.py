@@ -140,13 +140,18 @@ def main(json_file: str, output: str | None = None, decimals: int = 4,
         headers = ["dataset", *(label for label, _ in columns)]
         rows = [[name, *(values.get(path) for _, path in columns)]
                 for name, values in flattened]
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with output.open("w", encoding="utf-8-sig", newline="") as stream:
-            writer = csv.writer(stream, delimiter="\t")
-            writer.writerow(headers)
-            writer.writerows(rows)
+        write_table(headers, rows, output, decimals)
     except (OSError, ValueError) as exc:
         raise fire.core.FireError(str(exc)) from exc
+
+
+def write_table(headers, rows, output: Path, decimals: int = 4) -> None:
+    """Export full-precision TSV values and print an aligned terminal table."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8-sig", newline="") as stream:
+        writer = csv.writer(stream, delimiter="\t")
+        writer.writerow(headers)
+        writer.writerows(rows)
 
     def display(value):
         if value is None:

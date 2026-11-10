@@ -5,7 +5,9 @@ from utils.difficulty_response import parse_prediction_response
 def generate(prompts, validators, *, backend, model_path, model=None,
              temperature=0.9, top_p=1.0, max_tokens=8192, retry=3,
              enable_thinking=False, reasoning_effort="medium", vllm_kwargs=None,
-             response_format="json"):
+             response_format="json", think_tag="think"):
+    from utils.helpers import validate_think_tag
+    validate_think_tag(think_tag)
     if retry < 0:
         raise ValueError("retry must be nonnegative")
     if not prompts:
@@ -69,7 +71,7 @@ def generate(prompts, validators, *, backend, model_path, model=None,
             temperature=min(1.0, temperature + 0.1 * attempt), top_p=top_p, max_tokens=max_tokens))
         for i, output in zip(pending, outputs):
             raw = output.outputs[0].text
-            thinking, answer = split_thinking(raw)
+            thinking, answer = split_thinking(raw, think_tag)
             parsed = parser(answer, i)
             generated = output.outputs[0]
             histories[i].append(dict(response=answer, thinking=thinking, raw_output=raw,

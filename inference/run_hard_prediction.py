@@ -14,6 +14,7 @@ from data.run_oss_hard_annotation import _input_paths, load_items
 from inference.hard_generation import generate
 from inference.run_oss_hard_annotation import validate_annotation
 from inference.sft_hard_prompts import SFT_HARD_PROMPT_VERSION, build_sft_hard_prompt
+from utils.helpers import validate_think_tag
 from utils.difficulty_fallback import resolve_prediction
 from utils.difficulty_protocol import (
     indexed, load_annotations, prediction_sources, save_artifact, validate_runs,
@@ -23,8 +24,9 @@ from utils.hard_protocol import normalize_bool, output_paths, parse_data_ids
 
 def predict(items, model_path, *, include_calibration=False, examples_per_score=2,
             max_span_chars=48, max_span_words=8, failure_mode="strict", runs: int = 1,
-            enable_thinking=True, **generation_options):
+            enable_thinking=True, think_tag="think", **generation_options):
     """Generate run-major predictions from source text and language direction only."""
+    validate_think_tag(think_tag)
     validate_runs(runs)
     if failure_mode not in {"strict", "fallback"}:
         raise ValueError("failure_mode must be strict or fallback")
@@ -42,7 +44,7 @@ def predict(items, model_path, *, include_calibration=False, examples_per_score=
     results = generate(prompts,
         [lambda value, item=item: validate_annotation(value, item, **limits) for item in repeated],
         backend="inst", model_path=model_path, enable_thinking=enable_thinking,
-        response_format="json", **generation_options)
+        response_format="json", think_tag=think_tag, **generation_options)
     if len(results) != len(repeated):
         raise ValueError("Prediction output count mismatch")
     output = []
@@ -59,10 +61,11 @@ def main(output_dir, model_path, data_id=None, annotations_dir=None, input_file=
          data_dir=None, max_samples: int = 0, temperature=0.9, top_p=1.0,
          max_tokens=8192, retry=3, enable_thinking=True, include_calibration=False,
          examples_per_score=2, max_span_chars=48, max_span_words=8,
-         vllm_kwargs=None, failure_mode="strict", runs: int = 1):
+         vllm_kwargs=None, failure_mode="strict", runs: int = 1, think_tag: str = "think"):
     """Predict direct difficulty from annotations or source Parquet; QE is unsupported."""
     if not isinstance(model_path, str) or not model_path.strip():
         raise ValueError("Provide an explicit model_path")
+    validate_think_tag(think_tag)
     validate_runs(runs)
     if type(max_samples) is not int or max_samples < 0:
         raise ValueError("max_samples must be a nonnegative integer")
@@ -89,7 +92,7 @@ def main(output_dir, model_path, data_id=None, annotations_dir=None, input_file=
         retry=retry, enable_thinking=normalize_bool(enable_thinking),
         include_calibration=normalize_bool(include_calibration), examples_per_score=examples_per_score,
         max_span_chars=max_span_chars, max_span_words=max_span_words,
-        vllm_kwargs=vllm_kwargs, failure_mode=failure_mode, runs=runs)
+        vllm_kwargs=vllm_kwargs, failure_mode=failure_mode, runs=runs, think_tag=think_tag)
     print(f"Prediction: backend=inst; mode=direct; sources={len(items)}; "
           f"runs={runs}; requests={len(items) * runs}", flush=True)
     output = predict(items, model_path, **options)

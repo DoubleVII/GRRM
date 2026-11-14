@@ -30,6 +30,8 @@ def generate(prompts, validators, *, backend, model_path, model=None,
                 print(f"Generation (oss): pending={len(inputs)}/{len(prompts)}; "
                       f"temperature={sampling_params.temperature}", flush=True)
                 outputs = model.generate(inputs, sampling_params=sampling_params)
+                if len(outputs) != len(inputs):
+                    raise ValueError('Generation count mismatch')
                 for index, output in zip(pending, outputs):
                     generated = output.outputs[0]
                     thinking, response = _response_text(generated.token_ids, encoding)
@@ -69,6 +71,8 @@ def generate(prompts, validators, *, backend, model_path, model=None,
               f"pending={len(pending)}/{len(prompts)}", flush=True)
         outputs = engine.model.generate([rendered[i] for i in pending], SamplingParams(
             temperature=min(1.0, temperature + 0.1 * attempt), top_p=top_p, max_tokens=max_tokens))
+        if len(outputs) != len(pending):
+            raise ValueError('Generation count mismatch')
         for i, output in zip(pending, outputs):
             raw = output.outputs[0].text
             thinking, answer = split_thinking(raw, think_tag)

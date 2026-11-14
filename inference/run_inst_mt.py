@@ -21,7 +21,9 @@ class InstructEngine:
 def init_inst_model(model_path: str, **vllm_kwargs) -> InstructEngine:
     from vllm import LLM
 
-    tp_size = get_auto_tp_size()
+    tp_size = vllm_kwargs.pop("tensor_parallel_size", None)
+    if tp_size is None:
+        tp_size = get_auto_tp_size()
     model = LLM(
         model=model_path,
         trust_remote_code=True,

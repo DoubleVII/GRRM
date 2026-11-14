@@ -75,9 +75,11 @@ def extract_score(response: str):
 
 def init_oss_model(model: str, **vllm_kwargs):
     from vllm import LLM
-    tp_size = get_auto_tp_size()
+    tp_size = vllm_kwargs.pop("tensor_parallel_size", None)
+    if tp_size is None:
+        tp_size = get_auto_tp_size()
     llm = LLM(model=model, trust_remote_code=True, tensor_parallel_size=tp_size, **vllm_kwargs)
-    print(f"Detected CUDA devices: {tp_size}; tensor_parallel_size={tp_size}")
+    print(f"tensor_parallel_size={tp_size}")
     return llm
 
 def load_encoding():

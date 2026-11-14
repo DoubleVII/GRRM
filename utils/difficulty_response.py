@@ -5,6 +5,9 @@ from utils.hard_protocol import parse_json
 
 
 def parse_prediction_response(text, response_format="json"):
+    if response_format == "candidate_relaxed":
+        from utils.candidate_error_response import parse_response
+        return parse_response(text)
     if response_format == "json":
         return parse_json(text)
     if response_format != "analysis_codeblock":

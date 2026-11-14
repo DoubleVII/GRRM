@@ -89,6 +89,8 @@ def run_requests(items, prompts, *, model_path, backend='inst', scoring='severit
                   scoring=scoring, base_url=base_url, options=options)
     if not items:
         return []
+    # Validate trace metadata before loading a model or spending generation tokens.
+    request_hashes = [digest([config, item, prompt]) for item, prompt in zip(items, prompts)]
 
     def validator(i):
         if validator_factory is not None:
@@ -120,7 +122,7 @@ def run_requests(items, prompts, *, model_path, backend='inst', scoring='severit
     if len(generations) != len(items):
         raise ValueError('Generation count mismatch')
     return [dict(id=identity(item), item=item, config=config, prompt=prompt,
-                 request_hash=digest([config, item, prompt]),
+                 request_hash=request_hash,
                  status='ok' if generation.get('parsed') is not None else 'failed',
                  result=generation.get('parsed'), generation=generation)
-            for item, prompt, generation in zip(items, prompts, generations)]
+            for item, prompt, generation, request_hash in zip(items, prompts, generations, request_hashes)]

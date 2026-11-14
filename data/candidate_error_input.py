@@ -39,7 +39,7 @@ def load_items(input_file, data_id=None, candidate_model='provided', require_ref
                     item['ref_text']=row.get('ref_text',row.get('trg_text'))
                     if isinstance(row.get('comment'),str):
                         item['comment']=row['comment']
-                if row.get('ltb_id') is not None:
+                if row.get('ltb_id') is not None and pd.notna(row['ltb_id']):
                     item['ltb_id']=row['ltb_id']
                 for key in ('split','cohort','family','cluster'):
                     if isinstance(row.get(key),str):
@@ -50,7 +50,10 @@ def load_items(input_file, data_id=None, candidate_model='provided', require_ref
                         if key in row:
                             item[key] = row[key]
                     if 'candidate_indices' in row:
-                        item['candidate_indices'] = list(row['candidate_indices'])
+                        # Parquet list columns become NumPy arrays; list(array) keeps
+                        # np.int64 elements, which break request hashes/JSON artifacts.
+                        indices = row['candidate_indices']
+                        item['candidate_indices'] = indices.tolist() if hasattr(indices, 'tolist') else list(indices)
                 items.append(item)
     else:
         raise ValueError('Use .jsonl or .parquet input')

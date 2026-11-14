@@ -24,7 +24,7 @@ def predict_candidates(items, model_path, *, backend, scoring='probability',
     if prompt_variant != 'legacy':
         options['response_format'] = 'candidate_relaxed'
         if prompt_variant != 'legacy_analysis':
-            scale = 1 if prompt_variant == 'compact_probability' else 10
+            scale = 1 if prompt_variant == 'compact_probability' or scoring == 'probability01' else 10
             allow_minor = prompt_variant in MINOR_VARIANTS + SHORT_VARIANTS
             options['validator_factory'] = lambda i: lambda value: validate_compact(
                 value, items[i], scale=scale, allow_minor=allow_minor)

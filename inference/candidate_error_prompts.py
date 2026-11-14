@@ -284,6 +284,16 @@ Final: {"spans":[{"source_span":"exceptionally","severity":"minor","score":2,"re
 
 
 def build_prediction_prompt(item, variant, *, scoring='probability'):
+    # "probability" is the historical evaluation contract: most compact prompts
+    # already request integer scores and normalize them to confidence in [0, 1].
+    if scoring == 'score10':
+        if variant in ('legacy', 'legacy_analysis', 'compact_probability'):
+            raise ValueError('score10 requires a compact 0-10 prompt variant')
+        scoring = 'probability'
+    if scoring == 'probability01':
+        if variant != 'critical_combined_minor':
+            raise ValueError('probability01 currently supports critical_combined_minor only')
+        return build_critical_probability_prompt(item)
     if variant == 'legacy':
         return build_prompt(item, scoring=scoring)
     if scoring != 'probability':
@@ -293,3 +303,28 @@ def build_prediction_prompt(item, variant, *, scoring='probability'):
     if variant in CRITICAL_VARIANTS:
         return build_critical_prompt(item, variant)
     return build_shared_prompt(item, variant)
+
+
+def build_critical_probability_prompt(item):
+    """Same critical audit, with all score instructions/examples scaled to [0, 1]."""
+    import re
+    body, context = build_critical_prompt(item, 'critical_combined_minor').rsplit(
+        '\nNow check this translation:\n', 1)
+    replacements = {
+        'an integer from 0 to 10': 'a number from 0 to 1',
+        '10 unmistakable': '1.0 unmistakable',
+        '8-9 strong': '0.8-0.9 strong',
+        '6-7 likely': '0.6-0.7 likely',
+        '4-5 plausible': '0.4-0.5 plausible',
+        '1-3 weak': '0.1-0.3 weak',
+        'Do not assign 9 automatically.': 'Do not assign 0.9 automatically.',
+        'lower score (1-7)': 'lower score (0.1-0.7)',
+        'low major score (1-3)': 'low major score (0.1-0.3)',
+    }
+    for old, new in replacements.items():
+        if old not in body:
+            raise ValueError('Critical score anchor changed: ' + old)
+        body = body.replace(old, new)
+    body = re.sub(r'("score":\s*)(\d+)',
+                  lambda m: m[1] + str(int(m[2]) / 10), body)
+    return body + '\nNow check this translation:\n' + context

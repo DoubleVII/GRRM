@@ -11,10 +11,11 @@ from inference.candidate_error_generation import run_requests,online_one
 from utils.candidate_error_protocol import validate, locate
 from eval.candidate_error_core import (aggregate, average_precision, best_threshold,
     bootstrap, category_mapping, confidence_labels, curve, location_edges, score,reliability)
-from eval.run_candidate_error_eval import matching_prompt, prepare_rows
+from inference.run_oss_candidate_error_matching import matching_prompt, match
+from data.run_oss_candidate_error_matching import prepare_rows
 from eval.run_candidate_error_eval import evaluate
 from data.candidate_error_input import load_items
-from utils.candidate_error_protocol import read_predictions
+from utils.candidate_error_protocol import read_predictions, identity, write_jsonl
 from eval.candidate_error_contrast import evaluate_contrast
 from scripts.complete_candidate_error_pilot import shared_graphs
 from inference.run_inst_candidate_error_prediction import predict as predict_errors
@@ -217,17 +218,21 @@ class CandidateErrorTests(unittest.TestCase):
             root=Path(tmp)
             predictions=[];gold=[]
             for i,split in enumerate(('calibration','test')):
-                it=dict(item(),row_id=i,split=split,cluster=str(i))
-                predictions.append(dict(id=str(i),item=it,status='ok',result={'spans':[span(confidence=.7 if i==0 else .1)]}))
-                gold.append(dict(id=str(i),item=it,status='ok',result={'spans':[span()]}))
+                it=dict(item(),row_id=i,src_text='词𠮷词'+str(i),split=split,cluster=str(i))
+                predictions.append(dict(id=identity(it),item=it,status='ok',result={'spans':[span(confidence=.7 if i==0 else .1)]}))
+                gold.append(dict(id=identity(it),item=it,status='ok',result={'spans':[span()]}))
             def write(path,rows):
                 path.write_text(''.join(json.dumps(r)+'\n' for r in rows))
             write(root/'p.jsonl',predictions);write(root/'g.jsonl',gold)
-            evaluate(root/'p.jsonl',root/'g.jsonl',root/'first',match_mode='exact',n_bootstrap=20)
+            write_jsonl(root/'matching.jsonl', match(predictions, gold, match_mode='exact'))
+            split_file = root/'split.json'
+            split_file.write_text(json.dumps({'calibration': [predictions[0]['id']], 'test': [predictions[1]['id']]}))
+            evaluate(root/'matching.jsonl', root/'first', split_file=split_file, n_bootstrap=20)
             first=json.loads((root/'first/calibration.json').read_text())
             predictions[1]['result']['spans'][0]['confidence']=.99
             write(root/'p.jsonl',predictions)
-            evaluate(root/'p.jsonl',root/'g.jsonl',root/'second',match_mode='exact',n_bootstrap=20)
+            write_jsonl(root/'matching.jsonl', match(predictions, gold, match_mode='exact'))
+            evaluate(root/'matching.jsonl', root/'second', split_file=split_file, n_bootstrap=20)
             second=json.loads((root/'second/calibration.json').read_text())
             self.assertEqual(first['threshold'],second['threshold'])
             self.assertEqual(first['threshold'],.7)

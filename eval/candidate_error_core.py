@@ -2,7 +2,7 @@
 from collections import Counter, defaultdict
 import math
 import numpy as np
-from eval.span_matching import maximum_matching
+from utils.span_matching import maximum_matching, iou, location_edges
 
 
 def eligible(span, major=True):
@@ -15,30 +15,6 @@ def score(span, scoring, mapping=None):
     if scoring == 'categorical':
         return (mapping or {'low': 0., 'medium': .5, 'high': 1.})[span['confidence']]
     return span['confidence']
-
-
-def iou(a, b):
-    if a.get('source_start') is None or b.get('source_start') is None:
-        return 0.
-    overlap = max(0, min(a['source_end'], b['source_end']) - max(a['source_start'], b['source_start']))
-    union = max(a['source_end'], b['source_end']) - min(a['source_start'], b['source_start'])
-    return overlap / union if union else 0.
-
-
-def location_edges(predicted, golden, mode='overlap'):
-    edges = []
-    for i, p in enumerate(predicted):
-        for j, g in enumerate(golden):
-            if mode == 'exact':
-                match = p.get('source_start') is not None and (p['source_start'], p['source_end']) == (g['source_start'], g['source_end'])
-            elif mode == 'overlap':
-                # Deterministic diagnostic only; semantic-location graph is primary.
-                match = iou(p, g) >= .5
-            else:
-                raise ValueError(mode)
-            if match:
-                edges.append([i, j])
-    return edges
 
 
 def prf(tp, fp, fn):

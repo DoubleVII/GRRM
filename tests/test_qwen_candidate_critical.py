@@ -10,14 +10,15 @@ from utils.candidate_error_response import validate_compact
 from tests.test_qwen_candidate_error import item, output
 from scripts.experiment_qwen_critical import major_gate
 from eval.candidate_error_core import aggregate
-from eval.run_candidate_error_eval import prepare_rows
+from data.run_oss_candidate_error_matching import prepare_rows
+from utils.candidate_error_protocol import identity
 
 
 class CriticalPromptTests(unittest.TestCase):
     def test_failed_judge_has_separate_budget_rescue_and_keeps_primary_failure(self):
         it = item()
         spans = validate_compact(output(), it)['spans']
-        record = dict(id='x', item=it, status='ok', result={'spans': spans})
+        record = dict(id=identity(it), item=it, status='ok', result={'spans': spans})
         failure = dict(status='failed', result=None)
         calls = []
         def requests(items, prompts, **kwargs):
@@ -26,7 +27,7 @@ class CriticalPromptTests(unittest.TestCase):
                 return [failure]
             value = kwargs['validator_factory'](0)({'analysis': 'same source location', 'pairs': [[0, 0]]})
             return [dict(status='ok', result=value)]
-        with tempfile.TemporaryDirectory() as tmp, patch('eval.run_candidate_error_eval.run_requests', side_effect=requests):
+        with tempfile.TemporaryDirectory() as tmp, patch('inference.run_oss_candidate_error_matching.run_requests', side_effect=requests):
             rows, audit = prepare_rows([record], [record], tmp, model_path='oss', base_url='http://test',
                                        max_tokens=2048, rescue_max_tokens=8192)
         self.assertEqual(calls, [2048, 8192])
@@ -36,8 +37,8 @@ class CriticalPromptTests(unittest.TestCase):
 
     def test_unsuccessful_rescue_still_contributes_zero_matches(self):
         it = item()
-        record = dict(id='x', item=it, status='ok', result={'spans': validate_compact(output(), it)['spans']})
-        with tempfile.TemporaryDirectory() as tmp, patch('eval.run_candidate_error_eval.run_requests',
+        record = dict(id=identity(it), item=it, status='ok', result={'spans': validate_compact(output(), it)['spans']})
+        with tempfile.TemporaryDirectory() as tmp, patch('inference.run_oss_candidate_error_matching.run_requests',
                 return_value=[dict(status='failed', result=None)]):
             rows, audit = prepare_rows([record], [record], tmp, model_path='oss', base_url='http://test',
                                        max_tokens=2048, rescue_max_tokens=8192)

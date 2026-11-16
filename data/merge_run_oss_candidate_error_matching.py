@@ -67,7 +67,7 @@ def prepare_rows(predictions, silver, output_dir, *, rescue_max_tokens=None, **o
 
 def main(output_dir, model_path=None, predictions_dir=None, silver_dir=None, data_ids=None,
          predictions_file=None, silver_file=None, match_mode='semantic',
-         temperature=0., top_p=1., max_tokens=8192, retry=3, reasoning_effort='medium',
+         temperature=0.6, top_p=1., max_tokens=8192, retry=3, reasoning_effort='medium',
          vllm_kwargs=None, dry_run=False):
     """Supply either a pair of files or two directories plus explicit data_ids.
 

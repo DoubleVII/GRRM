@@ -10,7 +10,7 @@ from utils.candidate_error_response import validate_compact
 from tests.test_qwen_candidate_error import item, output
 from scripts.experiment_qwen_critical import major_gate
 from eval.candidate_error_core import aggregate
-from data.run_oss_candidate_error_matching import prepare_rows
+from data.merge_run_oss_candidate_error_matching import prepare_rows
 from utils.candidate_error_protocol import identity
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 import time
 
 from eval.candidate_error_core import aggregate, best_threshold, category_mapping, curve
-from data.run_oss_candidate_error_matching import prepare_rows
+from data.merge_run_oss_candidate_error_matching import prepare_rows
 from eval.run_candidate_error_eval import report_rows
 from eval.candidate_error_contrast import evaluate_contrast
 from scripts.run_candidate_error_pilot import run, OSS, ENDPOINTS

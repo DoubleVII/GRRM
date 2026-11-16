@@ -12,7 +12,7 @@ from utils.candidate_error_protocol import validate, locate
 from eval.candidate_error_core import (aggregate, average_precision, best_threshold,
     bootstrap, category_mapping, confidence_labels, curve, location_edges, score,reliability)
 from inference.run_oss_candidate_error_matching import matching_prompt, match
-from data.run_oss_candidate_error_matching import prepare_rows
+from data.merge_run_oss_candidate_error_matching import prepare_rows
 from eval.run_candidate_error_eval import evaluate
 from data.candidate_error_input import load_items
 from utils.candidate_error_protocol import read_predictions, identity, write_jsonl

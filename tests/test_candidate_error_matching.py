@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from inference.run_oss_candidate_error_matching import match, matching_prompt
-from data.run_oss_candidate_error_matching import main as save_matching
+from data.merge_run_oss_candidate_error_matching import main as save_matching
 from eval.run_candidate_error_eval import evaluate, load_matching, assign_splits
 from tests.test_candidate_error_pipeline import item, span
 from utils.candidate_error_protocol import identity, write_jsonl, read_jsonl
@@ -24,6 +24,13 @@ def records(data_id='test', index=0, **metadata):
 
 
 class MatchingTests(unittest.TestCase):
+    def test_merged_entrypoint_requires_directories_and_rejects_file_options(self):
+        with self.assertRaises(TypeError):
+            save_matching(output_dir='unused', predictions_file='p.jsonl', silver_file='g.jsonl')
+        with self.assertRaises(TypeError):
+            save_matching(predictions_dir='p', silver_dir='g', output_dir='unused',
+                          predictions_file='p.jsonl', silver_file='g.jsonl')
+
     def test_prompt_ignores_prediction_explanation_and_scores(self):
         p, _ = records()
         a = matching_prompt(p['item'], [span()], [span()])
@@ -112,6 +119,29 @@ class MatchingTests(unittest.TestCase):
                 save_matching(**kwargs)
             with self.assertRaisesRegex(ValueError, 'Missing'):
                 save_matching(**dict(kwargs, data_ids='missing'), dry_run=True)
+
+    def test_none_data_ids_discovers_all_datasets_and_requires_silver(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ('b', 'a'):
+                p, g = records(name)
+                write_jsonl(root/'p'/name/'predictions.jsonl', [p])
+                write_jsonl(root/'g'/name/'final.jsonl', [g])
+            kwargs = dict(predictions_dir=root/'p', silver_dir=root/'g', output_dir=root/'out',
+                          match_mode='exact')
+            save_matching(**kwargs, data_ids=None)
+            manifest = json.loads((root/'out/manifest.json').read_text())
+            self.assertEqual([entry['data_id'] for entry in manifest['files']], ['a', 'b'])
+            self.assertEqual(manifest['total'], 2)
+            self.assertTrue(all((root/'out'/name/'matching.jsonl').is_file() for name in ('a', 'b')))
+            (root/'g/b/final.jsonl').unlink()
+            with patch('inference.hard_generation.generate') as generate:
+                with self.assertRaisesRegex(ValueError, 'Missing prediction or silver'):
+                    save_matching(**dict(kwargs, output_dir=root/'missing'), dry_run=True)
+                generate.assert_not_called()
+            (root/'empty').mkdir()
+            with self.assertRaisesRegex(ValueError, 'No dataset'):
+                save_matching(**dict(kwargs, predictions_dir=root/'empty'), dry_run=True)
 
     def test_offline_metrics_reuse_and_gold_failure_audit(self):
         ps, gs = zip(*(records(index=i) for i in range(3)))
@@ -204,7 +234,7 @@ class MatchingTests(unittest.TestCase):
             p, g = records()
             write_jsonl(root/'p/test/predictions.jsonl', [p])
             write_jsonl(root/'g/test/final.jsonl', [g])
-            args = [sys.executable, '-m', 'data.run_oss_candidate_error_matching',
+            args = [sys.executable, '-m', 'data.merge_run_oss_candidate_error_matching',
                     '--predictions_dir', str(root/'p'), '--silver_dir', str(root/'g'),
                     '--output_dir', str(root/'matches'), '--data_ids', 'test']
             subprocess.run([*args, '--dry_run', 'true'], check=True, capture_output=True)

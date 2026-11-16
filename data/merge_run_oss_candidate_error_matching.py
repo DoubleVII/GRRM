@@ -65,14 +65,15 @@ def prepare_rows(predictions, silver, output_dir, *, rescue_max_tokens=None, **o
     return [r for r in rows if not r['excluded_reason']], audit
 
 
-def main(output_dir, model_path=None, predictions_dir=None, silver_dir=None, data_ids=None,
-         predictions_file=None, silver_file=None, match_mode='semantic',
+def main(predictions_dir, silver_dir, output_dir, model_path=None, data_ids=None,
+         match_mode='semantic',
          temperature=0.6, top_p=1., max_tokens=8192, retry=3, reasoning_effort='medium',
          vllm_kwargs=None, dry_run=False):
-    """Supply either a pair of files or two directories plus explicit data_ids.
+    """Merge selected datasets from prediction and silver directories.
 
     Each directory dataset contains predictions.jsonl or final.jsonl. All selected
     datasets enter one inference call; output order follows prediction file order.
+    data_ids=None discovers every dataset with a predictions.jsonl file.
     No resume or overwrite. dry_run validates inputs without loading a model.
     """
     if isinstance(dry_run, str) and dry_run.lower() in ('true', 'false'):
@@ -80,15 +81,17 @@ def main(output_dir, model_path=None, predictions_dir=None, silver_dir=None, dat
     if not isinstance(dry_run, bool):
         raise ValueError('dry_run must be boolean')
     ids = parse_ids(data_ids)
-    if predictions_file is not None or silver_file is not None:
-        if not predictions_file or not silver_file or predictions_dir or silver_dir or ids:
-            raise ValueError('Supply only predictions_file and silver_file in file mode')
-        pairs = [(None, Path(predictions_file), Path(silver_file))]
-    else:
-        if not predictions_dir or not silver_dir or not ids:
-            raise ValueError('Directory mode requires predictions_dir, silver_dir and data_ids')
-        pairs = [(name, Path(predictions_dir)/name/'predictions.jsonl',
-                  Path(silver_dir)/name/'final.jsonl') for name in ids]
+    if not predictions_dir or not silver_dir:
+        raise ValueError('Requires predictions_dir and silver_dir')
+    for directory in (predictions_dir, silver_dir):
+        if not Path(directory).is_dir():
+            raise ValueError(f'Missing input directory: {directory}')
+    if ids is None:
+        ids = sorted(path.parent.name for path in Path(predictions_dir).glob('*/predictions.jsonl'))
+        if not ids:
+            raise ValueError(f'No dataset predictions.jsonl files found in {predictions_dir}')
+    pairs = [(name, Path(predictions_dir)/name/'predictions.jsonl',
+              Path(silver_dir)/name/'final.jsonl') for name in ids]
     root = Path(output_dir).resolve()
     predictions, silver, groups, sources = [], [], [], []
     for name, pp, gp in pairs:
@@ -100,13 +103,13 @@ def main(output_dir, model_path=None, predictions_dir=None, silver_dir=None, dat
         pv, gv = _read_upstream(pp, prediction=True), _read_upstream(gp)
         if not pv or not gv:
             raise ValueError(f'Empty prediction or silver file: {pp}, {gp}')
-        if name and any(r['item']['data_id'] != name for r in pv + gv):
+        if any(r['item']['data_id'] != name for r in pv + gv):
             raise ValueError(f'data_id differs from requested dataset: {name}')
         predictions.extend(pv)
         silver.extend(gv)
         groups.append((name, [r['id'] for r in pv]))
         sources.append(dict(data_id=name, predictions_file=str(pp.resolve()), silver_file=str(gp.resolve())))
-        print(f'Loaded {name or pp.name}: {len(pv)} candidates', flush=True)
+        print(f'Loaded {name}: {len(pv)} candidates', flush=True)
     # Exact mode provides the same input validation without loading any model.
     if dry_run:
         rows = match(predictions, silver, match_mode='exact')
@@ -116,8 +119,7 @@ def main(output_dir, model_path=None, predictions_dir=None, silver_dir=None, dat
         summary = dict(audit_rows(rows), semantic_requests=pending)
         print(summary, flush=True)
         return summary
-    destinations = [root/'manifest.json'] + [root/name/'matching.jsonl' if name else root/'matching.jsonl'
-                                            for name, _ in groups]
+    destinations = [root/'manifest.json'] + [root/name/'matching.jsonl' for name, _ in groups]
     if any(p.exists() for p in destinations):
         raise ValueError('Matching output already exists; use a new output_dir')
     options = dict(match_mode=match_mode, temperature=temperature, top_p=top_p,
@@ -130,7 +132,7 @@ def main(output_dir, model_path=None, predictions_dir=None, silver_dir=None, dat
     files = []
     for name, keys in groups:
         selected = [by_id[key] for key in keys]
-        directory = root/name if name else root
+        directory = root/name
         write_jsonl(directory/'matching.jsonl', selected)
         summary = audit_rows(selected)
         write_json(directory/'summary.json', summary)

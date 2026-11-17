@@ -17,6 +17,7 @@ def main(
     model_path: str = "gpt-oss-20b",
     prompt_type: str = "codeblock-think",
     use_chat_template: bool = True,
+    deduplicate: bool = True,
 ):
     assert output_path.endswith(".parquet")
 
@@ -42,7 +43,10 @@ def main(
     if sampling_n == 1:
         mt_sampling_text = [[r] for r in responses]
     else:
-        mt_sampling_text = [list(dict.fromkeys(cands)) for cands in responses]
+        mt_sampling_text = [
+            list(dict.fromkeys(cands)) if deduplicate else list(cands)
+            for cands in responses
+        ]
 
     df["mt_sampling_text"] = mt_sampling_text
 

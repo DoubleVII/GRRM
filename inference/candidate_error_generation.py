@@ -10,7 +10,7 @@ from utils.hard_protocol import normalize_bool
 from utils.helpers import split_thinking, validate_think_tag
 
 
-def online_one(prompt, validator, *, base_url, model_path, backend, temperature=0.1,
+def online_one(prompt, validator, *, base_url, model_path, backend, temperature=0.6,
                top_p=1.0, max_tokens=4096, retry=2, reasoning_effort='medium',
                format_feedback=False, response_format='json', enable_thinking=False,
                think_tag='think'):
@@ -76,7 +76,7 @@ def check_items(items):
 
 def run_requests(items, prompts, *, model_path, backend='inst', scoring='severity',
                  base_url=None, workers=8, validator_factory=None, model=None,
-                 model_factory=None, temperature=0.1, top_p=1.0, max_tokens=4096,
+                 model_factory=None, temperature=0.6, top_p=1.0, max_tokens=4096,
                  retry=2, reasoning_effort='medium', vllm_kwargs=None,
                  format_feedback=False, response_format='json', enable_thinking=False,
                  think_tag='think'):

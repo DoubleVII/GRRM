@@ -5,7 +5,7 @@ from data.candidate_error_workflow import annotate
 
 def main(input_file, output_dir, model_path, data_id=None, candidate_model='provided',
          src_lang=None, trg_lang=None, max_samples=0, review=True, base_url=None,
-         workers=8, temperature=0.1, max_tokens=4096, retry=2, vllm_kwargs=None,
+         workers=8, temperature=0.9, max_tokens=4096, retry=2, vllm_kwargs=None,
          prompt_variant='legacy', workflow='review', samples=3, min_successful_samples=2,
          reasoning_effort='medium'):
     items = load_items(input_file, data_id, candidate_model, True, src_lang, trg_lang, max_samples)

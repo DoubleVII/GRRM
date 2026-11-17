@@ -15,7 +15,7 @@ from utils.helpers import validate_think_tag
 
 def main(input_file, output_path, model_path, data_id=None, candidate_model='provided',
          src_lang=None, trg_lang=None, max_samples=0, scoring='score10',
-         base_url=None, workers=8, temperature=0.1, top_p=1.0, max_tokens=8192, retry=2,
+         base_url=None, workers=8, temperature=0.6, top_p=1.0, max_tokens=8192, retry=2,
          vllm_kwargs=None, prompt_variant='critical_micro_fit', enable_thinking=False,
          think_tag='think'):
     validate_think_tag(think_tag)

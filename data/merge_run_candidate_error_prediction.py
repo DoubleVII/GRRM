@@ -6,7 +6,7 @@ from utils.helpers import validate_think_tag
 
 
 def main(input_dir, output_dir, model_path, candidate_model='provided',
-         scoring='score10', base_url=None, workers=8, temperature=0.1, top_p=1.0,
+         scoring='score10', base_url=None, workers=8, temperature=0.6, top_p=1.0,
          max_tokens=8192, retry=2, vllm_kwargs=None, prompt_variant='critical_micro_fit',
          enable_thinking=False, think_tag='think'):
     validate_think_tag(think_tag)

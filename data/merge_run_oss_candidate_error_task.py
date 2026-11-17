@@ -9,7 +9,7 @@ from utils.candidate_error_protocol import digest, identity, write_json, write_j
 
 def main(input_dir, output_dir, model_path, task, candidate_model='provided',
          prompt_variant=None, scoring='probability', review=True, workflow='review',
-         reasoning_effort='medium', temperature=0.1, max_tokens=8192, retry=2,
+         reasoning_effort='medium', temperature=0.6, max_tokens=8192, retry=2,
          vllm_kwargs=None):
     """Read all recursive Parquet inputs before inference; keep existing candidate IDs.
 

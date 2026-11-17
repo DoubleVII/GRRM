@@ -4,7 +4,7 @@ from inference.run_inst_candidate_error_prediction import predict
 
 
 def main(input_dir, output_dir, model_path, candidate_model='provided',
-         scoring='probability', base_url=None, workers=8, temperature=0.1,
+         scoring='probability', base_url=None, workers=8, temperature=0.6,
          max_tokens=8192, retry=2, vllm_kwargs=None, prompt_variant='auto',
          reasoning_effort='medium'):
     return predict_directory(

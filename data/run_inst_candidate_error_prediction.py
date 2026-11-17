@@ -5,7 +5,7 @@ from data.candidate_error_workflow import predict
 
 def main(input_file, output_path, model_path, data_id=None, candidate_model='provided',
          src_lang=None, trg_lang=None, max_samples=0, scoring='probability',
-         base_url=None, workers=8, temperature=0.1, max_tokens=8192, retry=2,
+         base_url=None, workers=8, temperature=0.6, max_tokens=8192, retry=2,
          vllm_kwargs=None, prompt_variant='auto', reasoning_effort='medium'):
     items = load_items(input_file, data_id, candidate_model, False, src_lang, trg_lang, max_samples)
     return predict(items, output_path, model_path, backend='inst', scoring=scoring,

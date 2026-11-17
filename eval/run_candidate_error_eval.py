@@ -159,7 +159,7 @@ def _partition_keys(rows):
                                 if r['item'].get('ltb_id') is not None}))
 
 
-def _check_disjoint(calibration_keys, test_rows):
+def _check_disjoint(calibration_keys, test_rows, ignore_overlap=False):
     test_keys = _partition_keys(test_rows)
     overlap = {key: sorted(set(calibration_keys.get(key, [])) & set(test_keys[key]))
                for key in ('ids', 'sources', 'ltb_ids')}
@@ -167,19 +167,29 @@ def _check_disjoint(calibration_keys, test_rows):
         affected = [r['id'] for r in test_rows if r['id'] in overlap['ids'] or
                     source_cluster(r['item']) in overlap['sources'] or
                     (r['item'].get('ltb_id') is not None and str(r['item']['ltb_id']) in overlap['ltb_ids'])]
-        raise ValueError(f'Calibration/test overlap: {overlap}; test candidate IDs: {affected}')
+        message = f'Calibration/test overlap: {overlap}; test candidate IDs: {affected}'
+        if not ignore_overlap:
+            raise ValueError(message)
+        print(f'Overlap allowed by ignore_overlap=True: {message}', flush=True)
+        return dict(**overlap, test_candidate_ids=affected)
+    return dict(**overlap, test_candidate_ids=[])
 
 
 def evaluate(matching_input, output_dir, *, scoring='probability', data_ids=None,
              calibration_data_ids=None, test_data_ids=None, split_file=None,
-             calibration_file=None, threshold=None, n_bootstrap=2000):
+             calibration_file=None, threshold=None, n_bootstrap=2000, ignore_overlap=False):
     """Compute offline metrics. No model is imported or called.
 
     Dataset lists or split_file={"calibration": [candidate IDs], "test": [...]} assign
     splits explicitly; unlisted records are excluded. Without split arguments all
     selected records become test. cohort defaults to natural. A threshold is either
     explicit, selected by calibration major F1, or loaded from calibration_file.
+    ignore_overlap=True retains overlapping records and records overlap in audit.
     """
+    if isinstance(ignore_overlap, str) and ignore_overlap.lower() in ('true', 'false'):
+        ignore_overlap = ignore_overlap.lower() == 'true'
+    if not isinstance(ignore_overlap, bool):
+        raise ValueError('ignore_overlap must be boolean')
     if scoring not in ('probability', 'severity', 'categorical'):
         raise ValueError('Unknown scoring')
     if type(n_bootstrap) is not int or n_bootstrap < 0:
@@ -194,7 +204,8 @@ def evaluate(matching_input, output_dir, *, scoring='probability', data_ids=None
     test = [r for r in rows if r['item']['split'] == 'test']
     if not assigned_cal and not test:
         raise ValueError('No calibration or test records assigned')
-    _check_disjoint(_partition_keys(assigned_cal), test)
+    overlap_audit = dict(current_calibration=_check_disjoint(
+        _partition_keys(assigned_cal), test, ignore_overlap))
     included = [r for r in rows if r['item']['split'] != 'excluded' and not r['excluded_reason']]
     calibration = [r for r in included if r['item']['split'] == 'calibration' and r['item']['cohort'] == 'natural']
     if calibration_file:
@@ -203,7 +214,8 @@ def evaluate(matching_input, output_dir, *, scoring='probability', data_ids=None
             raise ValueError('Calibration scoring or match_mode mismatch')
         if frozen.get('threshold_source') != 'calibration_major_f1' or not frozen.get('calibration_keys'):
             raise ValueError('Expected a frozen independent calibration file with partition metadata')
-        _check_disjoint(frozen['calibration_keys'], test)
+        overlap_audit['frozen_calibration'] = _check_disjoint(
+            frozen['calibration_keys'], test, ignore_overlap)
         threshold, mapping = frozen['threshold'], frozen['mapping']
         threshold_source = 'frozen_calibration'
     else:
@@ -254,7 +266,8 @@ def evaluate(matching_input, output_dir, *, scoring='probability', data_ids=None
     audit = dict(total=len(rows), unassigned=len(rows)-len(assigned), included=len(included),
                  gold_failed=sum(bool(r['excluded_reason']) for r in assigned),
                  prediction_failed=sum(r['prediction_status'] != 'ok' for r in included),
-                 matching_failed=sum(r['matching_status'] == 'failed' for r in included), silver=True)
+                 matching_failed=sum(r['matching_status'] == 'failed' for r in included), silver=True,
+                 ignore_overlap=ignore_overlap, overlap=overlap_audit)
     root = Path(output_dir)
     source = Path(matching_input).resolve()
     if root.resolve() == source or (source.is_file() and root.resolve() == source.parent):

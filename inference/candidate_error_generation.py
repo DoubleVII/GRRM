@@ -6,14 +6,20 @@ import urllib.request
 
 from utils.candidate_error_protocol import VERSION, digest, identity, validate
 from utils.difficulty_response import parse_prediction_response
+from utils.hard_protocol import normalize_bool
+from utils.helpers import split_thinking, validate_think_tag
 
 
 def online_one(prompt, validator, *, base_url, model_path, backend, temperature=0.1,
                top_p=1.0, max_tokens=4096, retry=2, reasoning_effort='medium',
-               format_feedback=False, response_format='json'):
+               format_feedback=False, response_format='json', enable_thinking=False,
+               think_tag='think'):
+    validate_think_tag(think_tag)
+    enable_thinking = normalize_bool(enable_thinking)
     if retry < 0:
         raise ValueError('retry must be nonnegative')
     attempts = []
+    thinking = answer = raw_output = None
     for attempt in range(retry + 1):
         body = dict(model=model_path, messages=[{'role': 'user', 'content': prompt}],
                     temperature=min(1., temperature + .1 * attempt), top_p=top_p, max_tokens=max_tokens)
@@ -33,7 +39,7 @@ def online_one(prompt, validator, *, base_url, model_path, backend, temperature=
         if backend == 'oss':
             body['reasoning_effort'] = reasoning_effort
         else:
-            body['chat_template_kwargs'] = {'enable_thinking': False}
+            body['chat_template_kwargs'] = {'enable_thinking': enable_thinking}
         started = time.monotonic()
         record = dict(request=body, valid=False)
         parsed = None
@@ -43,7 +49,9 @@ def online_one(prompt, validator, *, base_url, model_path, backend, temperature=
             with urllib.request.urlopen(req, timeout=600) as response:
                 raw = json.load(response)
             message = raw['choices'][0]['message']
-            answer = message.get('content') or ''
+            raw_output = message.get('content') or ''
+            thinking, answer = split_thinking(raw_output, think_tag)
+            thinking = message.get('reasoning_content') or message.get('reasoning') or thinking
             parsed = validator(parse_prediction_response(answer,response_format))
             record.update(response=raw, valid=parsed is not None)
         except Exception as error:
@@ -51,8 +59,10 @@ def online_one(prompt, validator, *, base_url, model_path, backend, temperature=
         record['seconds'] = time.monotonic() - started
         attempts.append(record)
         if parsed is not None:
-            return dict(parsed=parsed, attempts=attempts)
-    return dict(parsed=None, attempts=attempts)
+            return dict(parsed=parsed, attempts=attempts, thinking=thinking,
+                        response=answer, raw_output=raw_output, response_format=response_format)
+    return dict(parsed=None, attempts=attempts, thinking=thinking,
+                response=answer, raw_output=raw_output, response_format=response_format)
 
 
 def check_items(items):
@@ -72,6 +82,8 @@ def run_requests(items, prompts, *, model_path, backend='inst', scoring='severit
                  think_tag='think'):
     """Generate all requests in memory; each offline attempt submits every pending request."""
     check_items(items)
+    validate_think_tag(think_tag)
+    enable_thinking = normalize_bool(enable_thinking)
     if not isinstance(prompts, list) or len(items) != len(prompts):
         raise ValueError('Request lengths differ or prompts is not a list')
     if backend not in ('inst', 'oss'):
@@ -107,7 +119,8 @@ def run_requests(items, prompts, *, model_path, backend='inst', scoring='severit
                 model_path=model_path, backend=backend, temperature=temperature,
                 top_p=top_p, max_tokens=max_tokens, retry=retry,
                 reasoning_effort=reasoning_effort, format_feedback=format_feedback,
-                response_format=response_format) for i, prompt in enumerate(prompts)]
+                response_format=response_format, enable_thinking=enable_thinking,
+                think_tag=think_tag) for i, prompt in enumerate(prompts)]
             generations = [future.result() for future in futures]
     else:
         from inference.hard_generation import generate

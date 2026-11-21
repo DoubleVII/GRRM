@@ -82,8 +82,18 @@ def load_matching(matching_input, data_ids=None):
     if len({r['id'] for r in rows}) != len(rows):
         raise ValueError('Duplicate matching identities; evaluate one candidate group/variant at a time')
     modes = {r.get('match_mode') for r in rows}
-    if len(modes) != 1 or not modes <= {'semantic', 'exact', 'overlap'}:
+    if len(modes) != 1 or not modes <= {'semantic', 'exact', 'overlap', 'proxy'}:
         raise ValueError('Matching records must have one consistent match_mode')
+    if modes == {'proxy'}:
+        from eval.span_proxy import matching_options
+        configs = []
+        for row in rows:
+            if not isinstance(row.get('matching_options'), dict):
+                raise ValueError('Proxy matching records require matching_options')
+            row['matching_options'] = matching_options(**row['matching_options'])
+            configs.append(digest(row['matching_options']))
+        if len(set(configs)) != 1:
+            raise ValueError('Proxy matching parameters differ across records')
     from utils.candidate_error_protocol import identity
     for r in rows:
         if r.get('schema') != 'candidate-error-matching-v1' or r['id'] != identity(r['item']):
@@ -216,6 +226,8 @@ def evaluate(matching_input, output_dir, *, scoring='probability', data_ids=None
             raise ValueError('Expected a frozen independent calibration file with partition metadata')
         overlap_audit['frozen_calibration'] = _check_disjoint(
             frozen['calibration_keys'], test, ignore_overlap)
+        if frozen.get('matching_options') != (rows[0].get('matching_options') if match_mode == 'proxy' else None):
+            raise ValueError('Calibration matching parameters mismatch')
         threshold, mapping = frozen['threshold'], frozen['mapping']
         threshold_source = 'frozen_calibration'
     else:
@@ -233,6 +245,7 @@ def evaluate(matching_input, output_dir, *, scoring='probability', data_ids=None
                 budgets[str(budget)] = max(affordable, key=lambda p: (p['recall'] or 0., -p['triggers_per_100']))['threshold']
         frozen = dict(scoring=scoring, threshold=threshold, mapping=mapping, match_mode=match_mode,
                       threshold_source=threshold_source, budget_thresholds=budgets,
+                      matching_options=rows[0].get('matching_options') if match_mode == 'proxy' else None,
                       calibration_keys=_partition_keys(assigned_cal), calibration_digest=digest(calibration))
     if type(threshold) not in (int, float) or not math.isfinite(threshold) or not 0 <= threshold <= 1.000001:
         raise ValueError('threshold must be finite and within [0, 1.000001]')
@@ -275,8 +288,19 @@ def evaluate(matching_input, output_dir, *, scoring='probability', data_ids=None
     write_json(root/'calibration.json', frozen)
     write_json(root/'rows.json', included)
     write_jsonl(root/'evaluation_rows.jsonl', rows)
+    # Keep the in-memory report_rows API compatible with existing research drivers,
+    # but persist per-span details separately from the human-readable summary.
+    summaries = {}
+    for name, report in reports.items():
+        reliability = dict(report['reliability'])
+        labels = reliability.pop('labels')
+        labels_file = f'{name}.confidence_labels.jsonl'
+        write_jsonl(root/labels_file, labels)
+        reliability['labels_file'] = labels_file
+        summaries[name] = dict(report, reliability=reliability)
     write_json(root/'report.json', dict(scoring=scoring, threshold=threshold, mapping=mapping,
-               threshold_source=threshold_source, audit=audit, match_mode=match_mode, reports=reports,
+               threshold_source=threshold_source, audit=audit, match_mode=match_mode, reports=summaries,
+               matching_options=rows[0].get('matching_options') if match_mode == 'proxy' else None,
                matching_input=str(source), matching_digest=matching_digest,
                evaluation_rows_digest=digest(rows),
                split_config=dict(data_ids=data_ids, calibration_data_ids=calibration_data_ids,

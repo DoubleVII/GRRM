@@ -6,7 +6,7 @@ def predict(items: list[dict], model_path: str, *,
             scoring: str = 'probability', prompt_variant: str = 'critical_combined_minor',
             temperature: float = 0.6, top_p: float = 1.0, max_tokens: int = 8192,
             retry: int = 2, reasoning_effort: str = 'medium',
-            model=None, model_factory=None, vllm_kwargs: dict | None = None,
+            model=None, vllm_kwargs: dict | None = None,
             base_url: str | list[str] | None = None, workers: int = 8,
             format_feedback: bool = False) -> list[dict]:
     """Predict with the OSS backend, returning one record per input in order.
@@ -22,10 +22,9 @@ def predict(items: list[dict], model_path: str, *,
         max_tokens: Maximum generated tokens per request.
         retry: Additional attempts for invalid responses.
         reasoning_effort: OSS reasoning budget: low, medium, or high.
-        model: Existing local backend model instance; takes precedence over model_factory.
-        model_factory: Optional zero-argument factory for a local model instance.
+        model: Existing local backend model instance; None loads model_path on demand.
         vllm_kwargs: Initialization arguments for the built-in local model loader;
-            unused when model or model_factory supplies the instance.
+            unused when model supplies the instance.
         base_url: OpenAI-compatible online endpoint or endpoints; None selects local vLLM.
         workers: Concurrent online requests; local inference submits all requests together.
         format_feedback: Add format guidance on online retries; unused for local generation.
@@ -35,6 +34,6 @@ def predict(items: list[dict], model_path: str, *,
     return predict_candidates(
         items, model_path, backend='oss', scoring=scoring, prompt_variant=prompt_variant,
         temperature=temperature, top_p=top_p, max_tokens=max_tokens, retry=retry,
-        reasoning_effort=reasoning_effort, model=model, model_factory=model_factory,
+        reasoning_effort=reasoning_effort, model=model,
         vllm_kwargs=vllm_kwargs, base_url=base_url, workers=workers,
         format_feedback=format_feedback)

@@ -15,7 +15,7 @@ class PredictionInterfaceTests(unittest.TestCase):
         for entry in (sft, inst, oss, predict_candidates):
             signature = inspect.signature(entry)
             self.assertFalse(any(p.kind == p.VAR_KEYWORD for p in signature.parameters.values()))
-            for name in ('temperature', 'top_p', 'max_tokens', 'retry', 'model', 'model_factory',
+            for name in ('temperature', 'top_p', 'max_tokens', 'retry', 'model',
                          'vllm_kwargs', 'base_url', 'workers', 'format_feedback'):
                 self.assertIn(name, signature.parameters)
         for entry in (sft, inst):

@@ -80,7 +80,7 @@ class CriticalPromptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch('inference.hard_generation.generate', side_effect=fake_generate):
                 records = predict([item()], 'model', prompt_variant='critical_minor',
-                                  model_factory=lambda: object())
+                                  model=object())
             self.assertEqual(records[0]['result']['spans'][0]['severity'], 'minor')
 
     def test_major_gate_preserves_edges_and_all_error_cost_is_separate(self):

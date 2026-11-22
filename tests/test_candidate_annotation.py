@@ -55,7 +55,7 @@ class AnnotationTests(unittest.TestCase):
             return [dict(id=identity(it), item=it, status='failed' if name == 'initial' else 'ok',
                          result=None if name == 'initial' else {'spans': []}) for it in items]
         with patch('inference.run_oss_candidate_error_annotation.run_requests', side_effect=fake):
-            rows = annotate([item()], 'unused', prompt_variant='critical', workflow='synthesis')
+            rows = annotate([item()], 'unused', prompt_variant='critical', workflow='synthesis', model=object())
         self.assertEqual(rows[0]['status'], 'ok')
         self.assertEqual(rows[0]['successful_samples'], 2)
         self.assertEqual(list(rows[0]['annotation_stages']), ['initial', 'independent', 'sample_2', 'synthesis'])
@@ -66,7 +66,7 @@ class AnnotationTests(unittest.TestCase):
         def fake(items, prompts, **options):
             return [dict(id=identity(it), item=it, status='failed', result=None) for it in items]
         with patch('inference.run_oss_candidate_error_annotation.run_requests', side_effect=fake):
-            row = annotate([item()], 'unused', prompt_variant='critical', workflow='synthesis')[0]
+            row = annotate([item()], 'unused', prompt_variant='critical', workflow='synthesis', model=object())[0]
         self.assertEqual(row['status'], 'failed')
         self.assertIsNone(row['result'])
         self.assertEqual(row['successful_samples'], 0)
@@ -83,6 +83,26 @@ class AnnotationTests(unittest.TestCase):
         self.assertEqual(initialize.call_count, 1)
         self.assertEqual(generate.call_count, 4)
         self.assertEqual(len(result[0]['annotation_stages']), 4)
+
+    def test_empty_missing_and_online_requests_do_not_load_local_model(self):
+        with patch('inference.run_oss_SQM.init_oss_model') as initialize:
+            self.assertEqual(annotate([], 'unused'), [])
+            missing = annotate([dict(item(), candidate=None)], 'unused')
+            self.assertEqual(missing[0]['status'], 'failed')
+            with patch('inference.candidate_error_generation.online_one',
+                       return_value=dict(parsed={'spans': []}, attempts=[])) as online:
+                rows = annotate([item()], 'unused', base_url='http://test',
+                                prompt_variant='critical', workflow='synthesis')
+            self.assertEqual(rows[0]['status'], 'ok')
+            self.assertEqual(online.call_count, 4)
+            initialize.assert_not_called()
+
+    def test_bad_metadata_fails_before_loading_annotation_model(self):
+        import numpy as np
+        with patch('inference.run_oss_SQM.init_oss_model') as initialize:
+            with self.assertRaises(TypeError):
+                annotate([dict(item(), candidate_indices=[np.int64(0)])], 'unused')
+            initialize.assert_not_called()
 
     def test_disallowed_workflow_fails_before_requests(self):
         for options in (dict(prompt_variant='wrong'), dict(workflow='synthesis'),

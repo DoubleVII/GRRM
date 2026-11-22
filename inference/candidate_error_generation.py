@@ -76,7 +76,7 @@ def check_items(items):
 
 def run_requests(items, prompts, *, model_path, backend='inst', scoring='severity',
                  base_url=None, workers=8, validator_factory=None, model=None,
-                 model_factory=None, temperature=0.6, top_p=1.0, max_tokens=4096,
+                 temperature=0.6, top_p=1.0, max_tokens=4096,
                  retry=2, reasoning_effort='medium', vllm_kwargs=None,
                  format_feedback=False, response_format='json', enable_thinking=False,
                  think_tag='think'):
@@ -124,8 +124,6 @@ def run_requests(items, prompts, *, model_path, backend='inst', scoring='severit
             generations = [future.result() for future in futures]
     else:
         from inference.hard_generation import generate
-        if model is None and model_factory is not None:
-            model = model_factory()
         generations = generate(
             prompts, [validator(i) for i in range(len(items))], backend=backend,
             model_path=model_path, model=model, temperature=temperature, top_p=top_p,

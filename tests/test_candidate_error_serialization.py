@@ -37,8 +37,7 @@ class CandidateSerializationTests(unittest.TestCase):
                     candidate_indices=[np.int64(0)])
         with patch('inference.hard_generation.generate') as generate:
             with self.assertRaisesRegex(TypeError, 'int64'):
-                run_requests([item], ['prompt'], model_path='test', backend='oss',
-                             model_factory=lambda: self.fail('Model initialized before serialization'))
+                run_requests([item], ['prompt'], model_path='test', backend='oss')
             generate.assert_not_called()
 
 

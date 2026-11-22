@@ -10,7 +10,7 @@ from utils.candidate_error_response import validate_compact
 def predict_candidates(items, model_path, *, backend, scoring='probability',
                        prompt_variant='auto', temperature=0.6, top_p=1.0, max_tokens=8192,
                        retry=2, reasoning_effort='medium', enable_thinking=False, think_tag='think',
-                       model=None, model_factory=None, vllm_kwargs=None, base_url=None,
+                       model=None, vllm_kwargs=None, base_url=None,
                        workers=8, format_feedback=False):
     check_items(items)
     if backend not in ('inst', 'oss'):
@@ -37,7 +37,7 @@ def predict_candidates(items, model_path, *, backend, scoring='probability',
                           scoring=scoring, temperature=temperature, top_p=top_p,
                           max_tokens=max_tokens, retry=retry, reasoning_effort=reasoning_effort,
                           enable_thinking=enable_thinking, think_tag=think_tag, model=model,
-                          model_factory=model_factory, vllm_kwargs=vllm_kwargs, base_url=base_url,
+                          vllm_kwargs=vllm_kwargs, base_url=base_url,
                           workers=workers, format_feedback=format_feedback,
                           response_format=response_format, validator_factory=validator_factory)
     by_id = {row['id']: row for row in result + missing}

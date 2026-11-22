@@ -2,13 +2,27 @@
 from inference.candidate_error_generation import check_items, run_requests
 from inference.candidate_error_prompts import build_prompt
 from inference.oss_candidate_error_prompts import build_annotation_prompt
-from utils.candidate_error_protocol import identity
+from utils.candidate_error_protocol import digest, identity
 from utils.candidate_error_response import validate_annotation
 
 
 def annotate(items, model_path, *, review=True, prompt_variant='legacy',
-             workflow='review', samples=3, min_successful_samples=2, model=None, **options):
+             workflow='review', samples=3, min_successful_samples=2, model=None,
+             temperature=None, top_p=1.0, max_tokens=4096, retry=2,
+             reasoning_effort='medium', vllm_kwargs=None, base_url=None, workers=8,
+             format_feedback=False):
     check_items(items)
+    options = dict(top_p=top_p, max_tokens=max_tokens,
+                   retry=retry, reasoning_effort=reasoning_effort, vllm_kwargs=vllm_kwargs,
+                   base_url=base_url, workers=workers, format_feedback=format_feedback)
+    # Preserve the generator's default temperature and independent-stage override
+    # when the caller does not explicitly choose a temperature.
+    if temperature is not None:
+        options['temperature'] = temperature
+    if retry < 0:
+        raise ValueError('retry must be nonnegative')
+    if reasoning_effort not in ('low', 'medium', 'high'):
+        raise ValueError('reasoning_effort must be low, medium, or high')
     original = items
     history = {}
     if prompt_variant not in ('legacy', 'critical') or workflow not in ('review', 'synthesis'):
@@ -43,18 +57,17 @@ def annotate(items, model_path, *, review=True, prompt_variant='legacy',
                  for row in rows + missing}
         return [by_id[identity(item)] for item in original]
 
-    def model_factory():
-        nonlocal model
-        if model is None:
-            from inference.run_oss_SQM import init_oss_model
-            model = init_oss_model(model_path, **(options.get('vllm_kwargs') or {}))
-        return model
-
     def stage(name, selected, prompts, **changes):
+        nonlocal model
+        if selected and not base_url and model is None:
+            # Reject unserializable trace metadata before loading the shared model.
+            digest([selected, prompts, options, changes])
+            from inference.run_oss_SQM import init_oss_model
+            model = init_oss_model(model_path, **(vllm_kwargs or {}))
         critical = dict(scoring='probability', validator_factory=lambda i:
                         lambda v: validate_annotation(v, selected[i])) if prompt_variant == 'critical' else {}
         rows = run_requests(selected, prompts, model_path=model_path,
-                            backend='oss', model_factory=model_factory,
+                            backend='oss', model=model,
                             **critical, **dict(options, **changes))
         history[name] = {row['id']: row for row in rows}
         return rows

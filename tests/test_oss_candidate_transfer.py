@@ -30,7 +30,7 @@ class OSSTransferTests(unittest.TestCase):
                 with patch('inference.hard_generation.generate', side_effect=generate), patch(
                         'inference.candidate_error_generation.online_one', side_effect=AssertionError('HTTP in offline path')):
                     records = predict([item()], 'oss-model',
-                        prompt_variant=variant, reasoning_effort='medium', model_factory=lambda:object())
+                        prompt_variant=variant, reasoning_effort='medium', model=object())
                 self.assertEqual(records[0]['status'], 'ok')
                 self.assertEqual(records[0]['config']['base_url'], None)
                 self.assertEqual(records[0]['result']['spans'][0]['confidence'], .2)

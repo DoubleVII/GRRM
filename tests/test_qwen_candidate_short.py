@@ -30,7 +30,7 @@ class ShortPredictionTests(unittest.TestCase):
                 with patch('inference.hard_generation.generate',side_effect=generate), patch(
                         'inference.candidate_error_generation.online_one',side_effect=AssertionError('HTTP in offline path')):
                     records = predict([item()], 'model',prompt_variant=variant,
-                                      model_factory=lambda:object())
+                                      model=object())
                 span = records[0]['result']['spans'][0]
                 self.assertEqual((span['severity'],span['confidence']),('minor',.2))
                 self.assertEqual(item()['src_text'][span['source_start']:span['source_end']],span['source_span'])

@@ -96,7 +96,7 @@ class QwenCandidateErrorTests(unittest.TestCase):
             return [{'parsed': validators[0](value)}]
         with tempfile.TemporaryDirectory() as tmp:
             with patch('inference.hard_generation.generate', side_effect=fake_generate):
-                records = predict([item()], 'test', model_factory=lambda: object())
+                records = predict([item()], 'test', model=object())
             self.assertEqual(records[0]['status'], 'ok')
             self.assertEqual(records[0]['result']['spans'][0]['confidence'], .9)
             with self.assertRaises(TypeError):

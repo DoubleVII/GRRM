@@ -2,7 +2,7 @@
 from data.candidate_error_input import load_items
 from inference.run_inst_candidate_error_prediction import predict
 from utils.hard_protocol import normalize_bool
-from utils.candidate_error_protocol import write_jsonl
+from utils.jsonl import write_jsonl
 
 
 def main(input_file, output_path, model_path, data_id=None, candidate_model='provided',

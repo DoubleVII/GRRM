@@ -4,7 +4,8 @@ from pathlib import Path
 from data.candidate_error_input import load_items
 from inference.run_oss_candidate_error_annotation import annotate
 from inference.run_oss_candidate_error_prediction import predict
-from utils.candidate_error_protocol import digest, identity, write_json, write_jsonl
+from utils.candidate_error_protocol import digest, identity, write_json
+from utils.jsonl import write_jsonl
 
 
 def main(input_dir, output_dir, model_path, task, candidate_model='provided',

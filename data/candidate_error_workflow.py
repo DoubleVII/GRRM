@@ -3,7 +3,8 @@ from pathlib import Path
 
 from data.candidate_error_input import load_items
 from inference.run_oss_candidate_error_annotation import annotate as annotate_items
-from utils.candidate_error_protocol import digest, identity, write_json, write_jsonl
+from utils.candidate_error_protocol import digest, identity, write_json
+from utils.jsonl import write_jsonl
 
 
 def predict_directory(input_dir, output_dir, model_path, *, predictor,

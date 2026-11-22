@@ -3,7 +3,8 @@ from pathlib import Path
 import json
 
 from inference.run_oss_candidate_error_matching import match
-from utils.candidate_error_protocol import write_json, write_jsonl, digest, source_cluster
+from utils.candidate_error_protocol import write_json, digest, source_cluster
+from utils.jsonl import write_jsonl
 
 
 def _read_upstream(path, prediction=False):

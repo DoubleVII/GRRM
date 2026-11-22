@@ -5,7 +5,8 @@ from pathlib import Path
 from eval.run_candidate_error_eval import report_rows, _names
 from scripts.report_hard_eval import write_table
 from scripts.report_hard_eval_balanced import GROUPS
-from utils.candidate_error_protocol import read_jsonl, digest
+from utils.candidate_error_protocol import digest
+from utils.jsonl import read_jsonl
 
 
 COLUMNS = ('N', 'Precision', 'Recall', 'F1', 'AP', 'SpanSpearman', 'Triggers/100')

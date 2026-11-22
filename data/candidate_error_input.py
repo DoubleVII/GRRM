@@ -1,6 +1,7 @@
 """Load flat candidate rows, with compatibility for legacy sampled Parquet data."""
 from pathlib import Path
-from utils.candidate_error_protocol import read_jsonl, identity
+from utils.candidate_error_protocol import identity
+from utils.jsonl import read_jsonl
 
 
 def load_items(input_file, data_id=None, candidate_model='provided', require_reference=False,

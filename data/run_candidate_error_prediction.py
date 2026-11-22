@@ -8,7 +8,7 @@ Run from the repository root::
 """
 from data.candidate_error_input import load_items
 from inference.run_candidate_error_prediction import predict
-from utils.candidate_error_protocol import write_jsonl
+from utils.jsonl import write_jsonl
 from utils.hard_protocol import normalize_bool
 from utils.helpers import validate_think_tag
 

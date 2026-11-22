@@ -1,7 +1,7 @@
 """OSS candidate-error prediction over Parquet or JSONL."""
 from data.candidate_error_input import load_items
 from inference.run_oss_candidate_error_prediction import predict
-from utils.candidate_error_protocol import write_jsonl
+from utils.jsonl import write_jsonl
 
 
 def main(input_file, output_path, model_path, data_id=None, candidate_model='provided',

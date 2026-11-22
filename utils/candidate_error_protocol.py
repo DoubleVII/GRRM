@@ -4,6 +4,9 @@ import json
 import math
 from pathlib import Path
 
+# Preserve the historical import paths; JSONL I/O is implemented in utils.jsonl.
+from utils.jsonl import read_jsonl, write_jsonl
+
 VERSION = 'candidate-error-v1'
 SOURCE_KEYS = ('src_text', 'candidate', 'src_lang', 'trg_lang')
 
@@ -14,11 +17,6 @@ def identity(item):
 
 def digest(value):
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-
-
-def read_jsonl(path):
-    with Path(path).open(encoding='utf-8') as f:
-        return [json.loads(line) for line in f if line.strip()]
 
 
 def read_predictions(path):
@@ -37,16 +35,6 @@ def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + '.tmp')
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False), encoding='utf-8')
-    temporary.replace(path)
-
-
-def write_jsonl(path, rows):
-    """Replace a complete artifact after generation; never resume or append requests."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + '.tmp')
-    temporary.write_text(''.join(json.dumps(row, ensure_ascii=False, allow_nan=False) + '\n'
-                                 for row in rows), encoding='utf-8')
     temporary.replace(path)
 
 

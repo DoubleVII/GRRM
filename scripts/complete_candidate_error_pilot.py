@@ -12,7 +12,8 @@ from eval.candidate_error_contrast import evaluate_contrast
 from scripts.run_candidate_error_pilot import run, OSS, ENDPOINTS
 from scripts.run_candidate_error_baseline import run as baseline
 from scripts.audit_candidate_error_pilot import audit
-from utils.candidate_error_protocol import read_jsonl, read_predictions, write_json, digest
+from utils.candidate_error_protocol import read_predictions, write_json, digest
+from utils.jsonl import read_jsonl
 
 SCORING={'severity':'severity','fixed_probability':'probability','fixed_categorical':'categorical',
          'joint_probability':'probability','joint_categorical':'categorical','dual_probability':'probability',

@@ -5,13 +5,12 @@ import random
 from typing import List, Union
 from utils.config import LANG_MAP
 from inference.prompts import get_GQM_prompt as get_prompt
-from utils.helpers import _score_to_rank
+from utils.helpers import _cast_string_columns, _score_to_rank
 from utils.config import candidate_identifiers
 import json
 import math
 
 random.seed(114514)
-
 
 def _build_score_dict(scores: List[int]) -> dict:
     return {candidate_identifiers[i]: scores[i] for i in range(len(scores))}
@@ -242,6 +241,7 @@ def main(
     # Shuffle and save
     out_df = pd.DataFrame(data_items)
     out_df = out_df.sample(frac=1.0, random_state=114514)
+    out_df = _cast_string_columns(out_df)
     out_df.to_parquet(output_path, index=False)
     print(f"Total data items: {len(out_df)}")
 

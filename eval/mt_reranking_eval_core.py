@@ -324,7 +324,7 @@ def run_reranking_eval_core(
         tokenizer=ranking_tokenizer,
     )
     if use_notes:
-        ranking_kwargs["notes_list"] = flat_notes_list
+        ranking_kwargs["comment_list"] = flat_notes_list
     ranking_output = run_rm_GQM.func_call(**ranking_kwargs)
 
     ranking_scores = ranking_output["scores"]

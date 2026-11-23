@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Optional
 import warnings
 from openai_harmony import (
     HarmonyEncoding,
@@ -21,13 +21,20 @@ def extract_response(
 
 def prepare_vllm_inputs(
     src_list: list[str],
-    mt_list: list[str],
+    mt_list: list[list[str]],
     src_langs: list[str],
     trg_langs: list[str],
     encoding: HarmonyEncoding,
     reasoning_effort: str = None,
     explicit_analysis: bool = True,
+    ref_list: Optional[list[Optional[str]]] = None,
+    comment_list: Optional[list[Optional[str]]] = None,
 ):
+    for name, values in (("mt_list", mt_list), ("src_langs", src_langs),
+                         ("trg_langs", trg_langs), ("ref_list", ref_list),
+                         ("comment_list", comment_list)):
+        if values is not None and len(values) != len(src_list):
+            raise ValueError(f"{name} must have the same length as src_list.")
     inputs = []
     system_content = SystemContent.new()
     if reasoning_effort is not None:
@@ -39,11 +46,14 @@ def prepare_vllm_inputs(
             system_content.reasoning_effort = ReasoningEffort.LOW
         else:
             raise ValueError(f"Invalid reasoning_effort: {reasoning_effort}")
-    for src_text, mt_texts, src_lang, trg_lang in zip(
+    for i, (src_text, mt_texts, src_lang, trg_lang) in enumerate(zip(
         src_list, mt_list, src_langs, trg_langs
-    ):
+    )):
         prompt = get_oss_GQM_prompt(
-            src_lang, trg_lang, src_text, mt_texts, explicit_analysis=explicit_analysis
+            src_lang, trg_lang, src_text, mt_texts, explicit_analysis=explicit_analysis,
+            ref_text=ref_list[i] if ref_list is not None else None,
+            ref_lang=trg_lang,
+            comment=comment_list[i] if comment_list is not None else None,
         )
         convo = Conversation.from_messages(
             [
@@ -115,14 +125,21 @@ def func_call(
     reasoning_effort: str = None,
     explicit_analysis: bool = True,
     max_new_tokens: int = 8192,
+    ref_list: Optional[list[Optional[str]]] = None,
+    comment_list: Optional[list[Optional[str]]] = None,
 ):
-    from vllm import LLM, SamplingParams
-
+    """Score candidate groups with optional target-language references and expert comments."""
     if isinstance(src_langs, str):
         src_langs = [src_langs] * len(src_list)
     if isinstance(trg_langs, str):
         trg_langs = [trg_langs] * len(src_list)
-    assert len(src_list) == len(mt_list) == len(src_langs) == len(trg_langs)
+    for name, values in (("mt_list", mt_list), ("src_langs", src_langs),
+                         ("trg_langs", trg_langs), ("ref_list", ref_list),
+                         ("comment_list", comment_list)):
+        if values is not None and len(values) != len(src_list):
+            raise ValueError(f"{name} must have the same length as src_list.")
+
+    from vllm import SamplingParams
 
     out_data = {}
     out_data["scores"] = []
@@ -155,6 +172,8 @@ def func_call(
         encoding,
         reasoning_effort,
         explicit_analysis,
+        ref_list=ref_list,
+        comment_list=comment_list,
     )
     mt_count = [len(mt_texts) for mt_texts in mt_list]
     n = len(src_list)

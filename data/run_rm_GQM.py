@@ -36,7 +36,8 @@ def process_scores(
     response_key: str = "rm_response",
     src_lang_key: str = "src_lang",
     trg_lang_key: str = "trg_lang",
-    notes_key: Optional[str] = None,
+    ref_key: Optional[str] = None,
+    comment_key: Optional[str] = None,
     temperature: float = 1.0,
     top_p: float = 1.0,
     max_new_tokens: int = 4096,
@@ -70,8 +71,11 @@ def process_scores(
     trg_langs = todo_df[trg_lang_key].tolist()
 
     kwargs = {}
-    if notes_key is not None:
-        kwargs["notes_list"] = todo_df[notes_key].tolist()
+    for key, argument in ((ref_key, "ref_list"), (comment_key, "comment_list")):
+        if key is not None:
+            kwargs[argument] = [
+                None if _is_missing(value) else value for value in todo_df[key].tolist()
+            ]
 
     output_dict = run_rm_GQM.func_call(
         model_path=model_path,
@@ -121,7 +125,8 @@ def main(
     response_key: str = "rm_response",
     src_lang_key: str = "src_lang",
     trg_lang_key: str = "trg_lang",
-    notes_key: Optional[str] = None,
+    ref_key: Optional[str] = None,
+    comment_key: Optional[str] = None,
     temperature: float = 1.0,
     top_p: float = 1.0,
     max_new_tokens: int = 4096,
@@ -141,7 +146,8 @@ def main(
         response_key=response_key,
         src_lang_key=src_lang_key,
         trg_lang_key=trg_lang_key,
-        notes_key=notes_key,
+        ref_key=ref_key,
+        comment_key=comment_key,
         temperature=temperature,
         top_p=top_p,
         max_new_tokens=max_new_tokens,

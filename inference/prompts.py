@@ -67,6 +67,20 @@ You may refer to the following reference if necessary.
 """
 
 
+comment_prompt_template = """
+
+Expert comment:
+```
+{comment}
+```
+"""
+
+
+GQM_evidence_instruction = """
+
+Judge the candidates using the reference translation and expert comments above (when available), together with the source. These are evidence of intended meaning; accept faithful paraphrases rather than requiring identical reference wording."""
+
+
 candidate_prompt = """Translation {}:
 ```
 {}
@@ -167,6 +181,15 @@ def build_reference_prompt(ref_text: str = None, ref_lang: str = None) -> str:
     return reference_prompt_template.format(ref_lang, ref_text)
 
 
+def build_comment_prompt(comment: str = None) -> str:
+    if comment is None:
+        return ""
+    comment = comment.strip()
+    if not comment:
+        return ""
+    return comment_prompt_template.format(comment=comment)
+
+
 def get_GQM_prompt(
     source_lang,
     target_lang,
@@ -177,6 +200,7 @@ def get_GQM_prompt(
     notes: str = None,
     ref_text: str = None,
     ref_lang: str = None,
+    comment: str = None,
 ):
     if len(source_lang) == 2 and source_lang in LANG_MAP:
         source_lang = LANG_MAP[source_lang]
@@ -195,9 +219,10 @@ def get_GQM_prompt(
     )
 
     notes_prompt = build_notes_prompt(notes)
-    reference_prompt = build_reference_prompt(ref_text, ref_lang)
+    reference_prompt = build_reference_prompt(ref_text, ref_lang or target_lang)
+    comment_prompt = build_comment_prompt(comment)
 
-    return GQM_prompt_template.format(
+    prompt = GQM_prompt_template.format(
         source_lang=source_lang,
         target_lang=target_lang,
         task_prompt=task_prompt,
@@ -206,6 +231,9 @@ def get_GQM_prompt(
         reference_prompt=reference_prompt,
         notes_prompt=notes_prompt,
     )
+    if reference_prompt or comment_prompt:
+        prompt += comment_prompt + GQM_evidence_instruction
+    return prompt
 
 
 def get_oss_GQM_prompt(
@@ -214,6 +242,9 @@ def get_oss_GQM_prompt(
     source_text,
     mt_texts,
     explicit_analysis: bool = True,
+    ref_text: str = None,
+    ref_lang: str = None,
+    comment: str = None,
 ):
     """Build the JSON-scored prompt used by the OSS GQM evaluator."""
     source_lang = LANG_MAP.get(source_lang, source_lang)
@@ -231,13 +262,18 @@ def get_oss_GQM_prompt(
         analysis_instruction = "Output your analysis and comparison before the final JSON object."
     else:
         analysis_instruction = "Output only the final JSON object and no analysis."
-    return OSS_GQM_PROMPT_TEMPLATE.format(
+    prompt = OSS_GQM_PROMPT_TEMPLATE.format(
         source_lang=source_lang,
         target_lang=target_lang,
         analysis_instruction=analysis_instruction,
         source_text=source_text,
         candidate_prompts=candidate_prompts,
     )
+    reference_prompt = build_reference_prompt(ref_text, ref_lang or target_lang)
+    comment_prompt = build_comment_prompt(comment)
+    if reference_prompt or comment_prompt:
+        prompt += reference_prompt + comment_prompt + GQM_evidence_instruction
+    return prompt
 
 
 GQMPE_prompt_template = """Given a source text in {source_lang} and multiple translation candidates in {target_lang}. Perform a step by step analysis and comparison of the translation quality for the candidates. {task_prompt} Then provide a detailed post-edit analysis and a final improved translation in {target_lang}, selecting, combining, or editing the candidates as appropriate.

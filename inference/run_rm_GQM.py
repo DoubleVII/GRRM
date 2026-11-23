@@ -79,16 +79,18 @@ def func_call(
     add_example: bool = False,
     model = None,
     tokenizer = None,
-    notes_list: Optional[list[str]] = None,
     task_type: str = "gqm",
+    ref_list: Optional[list[Optional[str]]] = None,
+    comment_list: Optional[list[Optional[str]]] = None,
 ):
+    """Score candidate groups, optionally using target-language references and expert comments."""
     if task_type not in {"gqm", "gqmpe"}:
         raise ValueError("task_type must be one of {'gqm', 'gqmpe'}")
     if task_type == "gqmpe":
         if add_example:
             raise ValueError("GQMPE does not support add_example.")
-        if notes_list is not None and any(note is not None for note in notes_list):
-            raise ValueError("GQMPE does not currently support notes.")
+        if ref_list is not None or comment_list is not None:
+            raise ValueError("GQMPE does not currently support reference/comment input.")
         from inference.run_gqmpe import func_call as gqmpe_func_call
 
         return gqmpe_func_call(
@@ -106,8 +108,6 @@ def func_call(
             tokenizer=tokenizer,
         )
 
-    from vllm import LLM, SamplingParams
-
     assert prompt_type in Task_format.keys()
 
     if isinstance(src_langs, str):
@@ -117,8 +117,11 @@ def func_call(
 
     if len(src_list) != len(mt_list) or len(src_list) != len(src_langs) or len(src_list) != len(trg_langs):
         raise ValueError("src_list, mt_list, src_langs, and trg_langs must have the same length.")
-    if notes_list is not None and len(notes_list) != len(src_list):
-        raise ValueError("notes_list must have the same length as src_list.")
+    for name, values in (("ref_list", ref_list), ("comment_list", comment_list)):
+        if values is not None and len(values) != len(src_list):
+            raise ValueError(f"{name} must have the same length as src_list.")
+
+    from vllm import SamplingParams
 
     if model is None or tokenizer is None:
         gen_rm, tokenizer = load_model_tokenizer(model_path)
@@ -130,8 +133,13 @@ def func_call(
     # Build prompts
     prompt_list = []
     for i, (src_text, mt_texts, src_lang, trg_lang) in enumerate(zip(src_list, mt_list, src_langs, trg_langs)):
-        notes = notes_list[i] if notes_list else None
-        prompt = get_GQM_prompt(src_lang, trg_lang, src_text, mt_texts, prompt_type, add_example=add_example, notes=notes)
+        prompt = get_GQM_prompt(
+            src_lang, trg_lang, src_text, mt_texts, prompt_type,
+            add_example=add_example,
+            ref_text=ref_list[i] if ref_list is not None else None,
+            ref_lang=trg_lang,
+            comment=comment_list[i] if comment_list is not None else None,
+        )
         messages = [
             {"role": "user", "content": prompt},
         ]

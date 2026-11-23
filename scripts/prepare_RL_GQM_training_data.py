@@ -26,11 +26,19 @@ def _build_ground_truth(scores: List[int], prompt_type: str) -> Union[str, dict]
 
 
 def _sanitize_ref_text(ref_text: str, mt_texts: List[str]) -> Union[str, None]:
+    ref_text = _normalize_evidence(ref_text)
     if ref_text is None:
         return None
     if ref_text in mt_texts:
         return None
     return ref_text
+
+
+def _normalize_evidence(text):
+    if text is None or pd.isna(text):
+        return None
+    text = text.strip()
+    return text or None
 
 
 def _build_data_item(
@@ -46,15 +54,21 @@ def _build_data_item(
     shuffle_indices: List[int],
     include_mt_texts: bool = False,
     include_reference_prompt: bool = False,
+    comment: str = None,
+    include_comment_prompt: bool = False,
 ) -> dict:
     safe_ref_text = _sanitize_ref_text(ref_text, mt_texts)
     use_reference_prompt = include_reference_prompt and safe_ref_text is not None
+    safe_comment = _normalize_evidence(comment)
+    use_comment_prompt = include_comment_prompt and safe_comment is not None
     extra_info = {
         "src_lang": src_lang,
         "trg_lang": trg_lang,
         "ref_lang": ref_lang,
         "ref_text": ref_text,
         "reference_prompt_used": use_reference_prompt,
+        "comment": safe_comment,
+        "comment_prompt_used": use_comment_prompt,
         "analysis": analysis,
         "shuffle_indices": shuffle_indices,
     }
@@ -74,6 +88,7 @@ def _build_data_item(
                     prompt_type,
                     ref_text=safe_ref_text if use_reference_prompt else None,
                     ref_lang=ref_lang if use_reference_prompt else None,
+                    comment=safe_comment if use_comment_prompt else None,
                 ),
             }
         ],
@@ -95,6 +110,8 @@ def construct_data_item(
     prompt_type: str = "ranking_score",
     shuffle_augment: int = 0,
     include_reference_prompt: bool = False,
+    comment: str = None,
+    include_comment_prompt: bool = False,
 ) -> list:
     """
     Construct ranking data items, optionally with shuffle-based augmentation.
@@ -116,6 +133,8 @@ def construct_data_item(
             shuffle_indices=list(range(len(mt_texts))),
             include_mt_texts=True,
             include_reference_prompt=include_reference_prompt,
+            comment=comment,
+            include_comment_prompt=include_comment_prompt,
         )
     )
 
@@ -147,6 +166,8 @@ def construct_data_item(
                     prompt_type,
                     shuffle_indices=indices,
                     include_reference_prompt=include_reference_prompt,
+                    comment=comment,
+                    include_comment_prompt=include_comment_prompt,
                 )
             )
             num_generated += 1
@@ -168,9 +189,15 @@ def main(
     subgroup_augment: int = 0,
     shuffle_augment: int = 0,
     include_reference_prompt: bool = False,
+    include_comment_prompt: bool = False,
+    ref_key: str = "trg_text",
+    comment_key: str = "comment",
 ):
     assert prompt_type in ["ranking", "ranking_score"] # TODO: support score
     df = pd.read_parquet(data_path)
+    for enabled, key in ((include_reference_prompt, ref_key), (include_comment_prompt, comment_key)):
+        if enabled and key not in df.columns:
+            raise ValueError(f"Requested prompt evidence column is missing: {key}")
     data_items = []
 
     for _, row in df.iterrows():
@@ -178,7 +205,8 @@ def main(
         mt_texts = row[mt_key]
         src_lang = row["src_lang"]
         trg_lang = row["trg_lang"]
-        ref_text = row["trg_text"]
+        ref_text = _normalize_evidence(row.get(ref_key))
+        comment = _normalize_evidence(row.get(comment_key))
         analysis = row[analysis_key]
         scores = [int(s) for s in row[score_key]]
 
@@ -204,6 +232,8 @@ def main(
                 prompt_type,
                 shuffle_augment,
                 include_reference_prompt,
+                comment=comment,
+                include_comment_prompt=include_comment_prompt,
             )
         )
 
@@ -236,6 +266,8 @@ def main(
                         prompt_type,
                         shuffle_augment,
                         include_reference_prompt,
+                        comment=comment,
+                        include_comment_prompt=include_comment_prompt,
                     )
                 )
     # Shuffle and save
